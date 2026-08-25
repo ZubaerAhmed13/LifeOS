@@ -19,25 +19,17 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          mapfile -t prod < <(printf '%s\n' ci-assets/prod/part-*.txt | sort -V)
-          if [ ${#prod[@]} -eq 0 ]; then
-            echo 'ERROR: exact final package fragments are missing.' >&2
-            exit 21
-          fi
+          test -f ci-assets/prod/part-00.txt || { echo 'ERROR: exact final package fragments are missing.' >&2; exit 21; }
 
-          # The upload set contains a known 2,000-character boundary duplication:
-          # part-00 is 10,000 chars while subsequent normal chunks are 8,000.
-          # Test both lossless de-duplication directions and accept ONLY a candidate
-          # whose original gzip integrity check passes.
           : > /tmp/lifeos-prod.valid.b64
           {
-            head -c 8000 "${prod[0]}"
-            for ((i=1;i<${#prod[@]};i++)); do cat "${prod[$i]}"; done
+            head -c 8000 ci-assets/prod/part-00.txt
+            cat ci-assets/prod/part-0[1-9].txt ci-assets/prod/part-1[0-3].txt ci-assets/prod/part-14-*.txt
           } > /tmp/lifeos-prod.candidate-a.b64
           {
-            cat "${prod[0]}"
-            tail -c +2001 "${prod[1]}"
-            for ((i=2;i<${#prod[@]};i++)); do cat "${prod[$i]}"; done
+            cat ci-assets/prod/part-00.txt
+            tail -c +2001 ci-assets/prod/part-01.txt
+            cat ci-assets/prod/part-0[2-9].txt ci-assets/prod/part-1[0-3].txt ci-assets/prod/part-14-*.txt
           } > /tmp/lifeos-prod.candidate-b.b64
 
           for candidate in /tmp/lifeos-prod.candidate-a.b64 /tmp/lifeos-prod.candidate-b.b64; do
@@ -56,12 +48,12 @@ jobs:
           grep -q "DB_SCHEMA_VERSION=15" LifeOS_4_1_Final.html
           grep -q 'Adaptive Planning' LifeOS_4_1_Final.html
 
-          mapfile -t testparts < <(printf '%s\n' ci-tests-bundle/part-*.txt | sort -V)
+          testparts=(ci-tests-bundle/part-*.txt)
           if [ ${#testparts[@]} -eq 0 ]; then
             echo 'ERROR: existing Playwright suite bundle fragments are missing. Refusing to substitute a new suite.' >&2
             exit 22
           fi
-          cat "${testparts[@]}" > /tmp/lifeos-tests.b64
+          printf '%s\n' "${testparts[@]}" | sort -V | xargs cat > /tmp/lifeos-tests.b64
           base64 --decode /tmp/lifeos-tests.b64 > /tmp/lifeos-tests.gz
           gzip -t /tmp/lifeos-tests.gz
           mkdir -p reconstructed-tests
