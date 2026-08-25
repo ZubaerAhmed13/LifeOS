@@ -1,0 +1,165 @@
+name: LifeOS 4.1 Firefox WebKit Verification
+
+on:
+  push:
+    branches:
+      - verify-firefox-webkit-410
+  workflow_dispatch:
+
+jobs:
+  verify-assets:
+    runs-on: ubuntu-latest
+    outputs:
+      suite_dir: ${{ steps.reconstruct.outputs.suite_dir }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: reconstruct
+        name: Reconstruct exact final package and existing Playwright suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          prod=(ci-assets/prod/part-*.txt)
+          if [ ${#prod[@]} -eq 0 ]; then
+            echo 'ERROR: exact final package fragments are missing.' >&2
+            exit 21
+          fi
+          cat "${prod[@]}" > /tmp/lifeos-prod.b64
+          base64 --decode /tmp/lifeos-prod.b64 > /tmp/lifeos-prod.gz
+          gzip -t /tmp/lifeos-prod.gz
+          gzip -dc /tmp/lifeos-prod.gz > LifeOS_4_1_Final.html
+          test -s LifeOS_4_1_Final.html
+          grep -q 'LifeOS' LifeOS_4_1_Final.html
+
+          testparts=(ci-tests-bundle/part-*.txt)
+          if [ ${#testparts[@]} -eq 0 ]; then
+            echo 'ERROR: existing Playwright suite bundle fragments are missing. Refusing to substitute a new suite.' >&2
+            exit 22
+          fi
+          cat "${testparts[@]}" > /tmp/lifeos-tests.b64
+          base64 --decode /tmp/lifeos-tests.b64 > /tmp/lifeos-tests.gz
+          gzip -t /tmp/lifeos-tests.gz
+          mkdir -p reconstructed-tests
+          if tar -tzf /tmp/lifeos-tests.gz >/dev/null 2>&1; then
+            tar -xzf /tmp/lifeos-tests.gz -C reconstructed-tests
+          else
+            gzip -dc /tmp/lifeos-tests.gz > reconstructed-tests/lifeos-existing.spec.js
+          fi
+          test "$(find reconstructed-tests -type f | wc -l)" -gt 0
+          echo "suite_dir=reconstructed-tests" >> "$GITHUB_OUTPUT"
+          echo 'Exact final package and existing test bundle reconstructed successfully.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Archive reconstructed inputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: reconstructed-verification-inputs
+          path: |
+            LifeOS_4_1_Final.html
+            reconstructed-tests/
+          retention-days: 7
+
+  browser-verification:
+    needs: verify-assets
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [firefox, webkit]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download exact reconstructed package and suite
+        uses: actions/download-artifact@v4
+        with:
+          name: reconstructed-verification-inputs
+          path: verification-inputs
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Locate existing Playwright project
+        id: locate
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd verification-inputs
+          cp LifeOS_4_1_Final.html index.html
+          if [ -f reconstructed-tests/package.json ]; then
+            echo "workdir=verification-inputs/reconstructed-tests" >> "$GITHUB_OUTPUT"
+          else
+            echo "workdir=verification-inputs" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Install existing suite dependencies and real browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "${{ steps.locate.outputs.workdir }}"
+          if [ -f package-lock.json ]; then
+            npm ci
+          elif [ -f package.json ]; then
+            npm install
+          else
+            npm init -y >/dev/null
+            npm install --save-dev @playwright/test
+          fi
+          npx playwright install --with-deps "${{ matrix.browser }}"
+      - name: Start local server
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd verification-inputs
+          python3 -m http.server 4173 >/tmp/lifeos-http.log 2>&1 &
+          echo $! >/tmp/lifeos-http.pid
+          for i in {1..30}; do curl -fsS http://127.0.0.1:4173/index.html >/dev/null && exit 0; sleep 1; done
+          cat /tmp/lifeos-http.log
+          exit 31
+      - name: Run existing Playwright suite on ${{ matrix.browser }}
+        shell: bash
+        env:
+          LIFEOS_BASE_URL: http://127.0.0.1:4173/index.html
+          PLAYWRIGHT_BROWSER: ${{ matrix.browser }}
+        run: |
+          set -euo pipefail
+          cd "${{ steps.locate.outputs.workdir }}"
+          mapfile -t specs < <(find . -type f \( -name '*.spec.js' -o -name '*.spec.mjs' -o -name '*.spec.cjs' -o -name '*.spec.ts' -o -name '*.test.js' -o -name '*.test.ts' \) | sort)
+          if [ ${#specs[@]} -eq 0 ]; then
+            echo 'ERROR: no Playwright spec files found in the reconstructed existing suite.' >&2
+            exit 32
+          fi
+          echo "Running ${#specs[@]} existing spec file(s) with real ${{ matrix.browser }}."
+          if [ -f playwright.config.js ] || [ -f playwright.config.ts ] || [ -f playwright.config.mjs ] || [ -f playwright.config.cjs ]; then
+            npx playwright test --project="${{ matrix.browser }}"
+          else
+            cat > /tmp/lifeos-playwright.config.cjs <<'EOF'
+          const { defineConfig, devices } = require('@playwright/test');
+          module.exports = defineConfig({
+            testDir: process.cwd(),
+            timeout: 60000,
+            retries: 0,
+            workers: 1,
+            use: { baseURL: process.env.LIFEOS_BASE_URL, headless: true },
+            projects: [
+              { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
+              { name: 'webkit', use: { ...devices['Desktop Safari'] } }
+            ],
+            reporter: [['line']]
+          });
+          EOF
+            npx playwright test "${specs[@]}" --config=/tmp/lifeos-playwright.config.cjs --project="${{ matrix.browser }}"
+          fi
+      - name: Record actual browser execution
+        if: success()
+        shell: bash
+        run: |
+          echo '### REAL BROWSER EXECUTION: PASS' >> "$GITHUB_STEP_SUMMARY"
+          echo '- Browser: `${{ matrix.browser }}`' >> "$GITHUB_STEP_SUMMARY"
+          echo '- Engine installed by Playwright and existing suite executed successfully.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-${{ matrix.browser }}
+          path: |
+            verification-inputs/**/playwright-report/
+            verification-inputs/**/test-results/
+            /tmp/lifeos-http.log
+          if-no-files-found: ignore
+          retention-days: 7
