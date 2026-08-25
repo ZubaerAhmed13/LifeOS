@@ -19,7 +19,7 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          prod=(ci-assets/prod/part-*.txt)
+          mapfile -t prod < <(printf '%s\n' ci-assets/prod/part-*.txt | sort -V)
           if [ ${#prod[@]} -eq 0 ]; then
             echo 'ERROR: exact final package fragments are missing.' >&2
             exit 21
@@ -31,7 +31,7 @@ jobs:
           test -s LifeOS_4_1_Final.html
           grep -q 'LifeOS' LifeOS_4_1_Final.html
 
-          testparts=(ci-tests-bundle/part-*.txt)
+          mapfile -t testparts < <(printf '%s\n' ci-tests-bundle/part-*.txt | sort -V)
           if [ ${#testparts[@]} -eq 0 ]; then
             echo 'ERROR: existing Playwright suite bundle fragments are missing. Refusing to substitute a new suite.' >&2
             exit 22
