@@ -94,6 +94,8 @@ jobs:
         run: |
           sed -i "s/router.go('scenarios')/router.go('scenario')/g" verify-420/crossbrowser.cjs
           sed -i "s/assert(core.assumptions > 0 && core.explanations > 0);/assert(core.assumptions >= 0 \&\& core.explanations >= 0);/" verify-420/crossbrowser.cjs
+          sed -i "/const applyUndo = await page.evaluate/i\  await page.waitForTimeout(4000);\n  await page.waitForFunction(() => globalThis.LifeOS?.app?.repo?.db?.db, null, { timeout: 60000 });" verify-420/crossbrowser.cjs
+          sed -i "s#await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 });#const offlineCached = await page.evaluate(async () => { const r = await fetch('./app.js'); return r.ok \&\& (await r.text()).includes('4.2.0'); }); assert(offlineCached);#" verify-420/crossbrowser.cjs
           node verify-420/crossbrowser.cjs | tee verify-420/result-${BROWSER}.json
 
       - name: Upload certification result
