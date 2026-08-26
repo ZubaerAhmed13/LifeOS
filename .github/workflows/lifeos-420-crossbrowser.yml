@@ -1,0 +1,105 @@
+name: LifeOS 4.2 Cross-Browser Certification
+
+on:
+  push:
+    branches:
+      - verify-firefox-webkit-410
+    paths:
+      - 'verify-420/**'
+      - '.github/workflows/lifeos-420-crossbrowser.yml'
+  workflow_dispatch:
+
+jobs:
+  certify:
+    name: ${{ matrix.browser }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+
+    steps:
+      - name: Checkout verification branch
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Reconstruct exact LifeOS 4.2 release
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat \
+            verify-420/standalone/part00.txt \
+            verify-420/standalone/part01.txt \
+            verify-420/standalone/part02.txt \
+            verify-420/standalone/part03.txt \
+            verify-420/standalone/part04.txt \
+            verify-420/standalone/part05.txt \
+            verify-420/standalone/part06.txt \
+            verify-420/standalone/part07a.fix.txt \
+            verify-420/standalone/part07b.fix.txt \
+            verify-420/standalone/part08.txt \
+            verify-420/standalone/part09.txt \
+            verify-420/standalone/part10.txt \
+            verify-420/standalone/part11.txt \
+            verify-420/standalone/part12.txt > /tmp/lifeos-420.b64
+          base64 -d /tmp/lifeos-420.b64 > /tmp/lifeos-420.html.gz
+          gzip -dc /tmp/lifeos-420.html.gz > verify-420/LifeOS_4_2_Scenario_Forecasting_Standalone.html
+          echo '885fb07dca069f581ca9de785bcc5bfd9e39644a934c1c4cf2faba3f4bb257a3  verify-420/LifeOS_4_2_Scenario_Forecasting_Standalone.html' | sha256sum -c -
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          source=Path('verify-420/LifeOS_4_2_Scenario_Forecasting_Standalone.html').read_text()
+          css=re.search(r'<style>\n?(.*?)\n?</style>',source,re.S).group(1)+'\n'
+          js=re.search(r'<script>\n?(.*?)\n?</script>',source,re.S).group(1)+'\n'
+          Path('verify-420/pwa/app.css').write_text(css)
+          Path('verify-420/pwa/app.js').write_text(js)
+          PY
+          rm -rf verify-420/pwa/icons
+          cp -R icons verify-420/pwa/icons
+          echo '1018a0e384b50fa38fc1ee2c246743a930da89a52237a93001492f4cdc95e38c  verify-420/pwa/index.html' | sha256sum -c -
+          echo 'abd354806f30945af37e37568c218d494db9c2a38f3d6d53562ff48cdcbeb387  verify-420/pwa/manifest.webmanifest' | sha256sum -c -
+          echo 'e21eee8b3ab7ca69814e4337984951857e7c383594d04a5eadba69c718ee8062  verify-420/pwa/service-worker.js' | sha256sum -c -
+          echo 'e07357e200c62feb9601b5be7d45759de61d7740a15dcb60ecdd204c54b9d134  verify-420/pwa/planning-worker.js' | sha256sum -c -
+          echo '0d2988555133810b8f7aac6c629b6cd4a6417488e4b826415141285958e178ca  verify-420/pwa/app.css' | sha256sum -c -
+          echo '4869f91d6ee85b29120800c757b218f176f7313a8083936e6f29cf8df9daa8a1  verify-420/pwa/app.js' | sha256sum -c -
+
+      - name: Install Playwright
+        shell: bash
+        run: |
+          npm install --no-save playwright@1.57.0
+          npx playwright install --with-deps ${{ matrix.browser }}
+
+      - name: Start local LifeOS server
+        shell: bash
+        run: |
+          python3 -m http.server 4173 --bind 127.0.0.1 > /tmp/lifeos-http.log 2>&1 &
+          echo $! > /tmp/lifeos-http.pid
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:4173/verify-420/pwa/index.html >/dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat /tmp/lifeos-http.log
+          exit 1
+
+      - name: Run real browser certification
+        shell: bash
+        env:
+          BROWSER: ${{ matrix.browser }}
+          BASE_URL: http://127.0.0.1:4173/verify-420/pwa/index.html
+        run: |
+          node verify-420/crossbrowser.cjs | tee verify-420/result-${BROWSER}.json
+
+      - name: Upload certification result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lifeos-420-${{ matrix.browser }}-certification
+          path: |
+            verify-420/result-${{ matrix.browser }}.json
+            /tmp/lifeos-http.log
+          if-no-files-found: warn
