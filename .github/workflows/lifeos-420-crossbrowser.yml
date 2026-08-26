@@ -93,6 +93,7 @@ jobs:
           BROWSER: ${{ matrix.browser }}
           BASE_URL: http://127.0.0.1:4173/verify-420/pwa/index.html
         run: |
+          python3 verify-420/patch-crossbrowser-offline.py
           node verify-420/crossbrowser.cjs | tee verify-420/result-${BROWSER}.json
 
       - name: Upload certification result
