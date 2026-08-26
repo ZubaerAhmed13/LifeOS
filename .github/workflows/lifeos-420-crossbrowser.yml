@@ -50,7 +50,7 @@ jobs:
           base64 -d /tmp/lifeos-420.b64 > /tmp/lifeos-420.html.gz
           gzip -dc /tmp/lifeos-420.html.gz > verify-420/LifeOS_4_2_Scenario_Forecasting_Standalone.html
           python3 verify-420/patch-webkit-offline-worker.py
-          echo '49548303d7dae8b650920dc03c8cde532cf668cd2cb832e18acf52cba0b3816b  verify-420/LifeOS_4_2_Scenario_Forecasting_Standalone.html' | sha256sum -c -
+          echo '154a7abd9c91d3af16973abe9d72dd95848bdb78d06958b49da7d70c9cd73df8  verify-420/LifeOS_4_2_Scenario_Forecasting_Standalone.html' | sha256sum -c -
           python3 - <<'PY'
           from pathlib import Path
           import re
@@ -67,7 +67,7 @@ jobs:
           echo 'e21eee8b3ab7ca69814e4337984951857e7c383594d04a5eadba69c718ee8062  verify-420/pwa/service-worker.js' | sha256sum -c -
           echo 'e07357e200c62feb9601b5be7d45759de61d7740a15dcb60ecdd204c54b9d134  verify-420/pwa/planning-worker.js' | sha256sum -c -
           echo '0d2988555133810b8f7aac6c629b6cd4a6417488e4b826415141285958e178ca  verify-420/pwa/app.css' | sha256sum -c -
-          echo '673d89e725b55b01133825eeca444ca63fc4df35da0fd65f120c0b2026d0b5a9  verify-420/pwa/app.js' | sha256sum -c -
+          echo 'a3b0ba6ee361d92ccb73a00b597ba8a1dc695efb7b222c416e5a6831a02b47e1  verify-420/pwa/app.js' | sha256sum -c -
 
       - name: Install Playwright
         shell: bash
