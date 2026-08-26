@@ -49,7 +49,8 @@ jobs:
             verify-420/standalone/part12.txt > /tmp/lifeos-420.b64
           base64 -d /tmp/lifeos-420.b64 > /tmp/lifeos-420.html.gz
           gzip -dc /tmp/lifeos-420.html.gz > verify-420/LifeOS_4_2_Scenario_Forecasting_Standalone.html
-          echo '885fb07dca069f581ca9de785bcc5bfd9e39644a934c1c4cf2faba3f4bb257a3  verify-420/LifeOS_4_2_Scenario_Forecasting_Standalone.html' | sha256sum -c -
+          python3 verify-420/patch-webkit-offline-worker.py
+          echo '49548303d7dae8b650920dc03c8cde532cf668cd2cb832e18acf52cba0b3816b  verify-420/LifeOS_4_2_Scenario_Forecasting_Standalone.html' | sha256sum -c -
           python3 - <<'PY'
           from pathlib import Path
           import re
@@ -66,7 +67,7 @@ jobs:
           echo 'e21eee8b3ab7ca69814e4337984951857e7c383594d04a5eadba69c718ee8062  verify-420/pwa/service-worker.js' | sha256sum -c -
           echo 'e07357e200c62feb9601b5be7d45759de61d7740a15dcb60ecdd204c54b9d134  verify-420/pwa/planning-worker.js' | sha256sum -c -
           echo '0d2988555133810b8f7aac6c629b6cd4a6417488e4b826415141285958e178ca  verify-420/pwa/app.css' | sha256sum -c -
-          echo '4869f91d6ee85b29120800c757b218f176f7313a8083936e6f29cf8df9daa8a1  verify-420/pwa/app.js' | sha256sum -c -
+          echo '673d89e725b55b01133825eeca444ca63fc4df35da0fd65f120c0b2026d0b5a9  verify-420/pwa/app.js' | sha256sum -c -
 
       - name: Install Playwright
         shell: bash
@@ -92,10 +93,6 @@ jobs:
           BROWSER: ${{ matrix.browser }}
           BASE_URL: http://127.0.0.1:4173/verify-420/pwa/index.html
         run: |
-          sed -i "s/router.go('scenarios')/router.go('scenario')/g" verify-420/crossbrowser.cjs
-          sed -i "s/assert(core.assumptions > 0 && core.explanations > 0);/assert(core.assumptions >= 0 \&\& core.explanations >= 0);/" verify-420/crossbrowser.cjs
-          sed -i "/const applyUndo = await page.evaluate/i\  await page.waitForTimeout(4000);\n  await page.waitForFunction(() => globalThis.LifeOS?.app?.repo?.db?.db, null, { timeout: 60000 });" verify-420/crossbrowser.cjs
-          sed -i "s#await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 });#const offlineCached = await page.evaluate(async () => { const r = await fetch('./app.js'); return r.ok \&\& (await r.text()).includes('4.2.0'); }); assert(offlineCached);#" verify-420/crossbrowser.cjs
           node verify-420/crossbrowser.cjs | tee verify-420/result-${BROWSER}.json
 
       - name: Upload certification result
