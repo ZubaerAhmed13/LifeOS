@@ -15,9 +15,6 @@ async function waitForApp(page) {
   const browser = await launch.launch({ headless: true });
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, serviceWorkers: 'allow' });
 
-  // Install/activate the PWA worker before opening the page used for consequential
-  // tests. This avoids controllerchange reload races in Firefox/WebKit while still
-  // exercising the real service-worker lifecycle.
   const bootstrap = await context.newPage();
   await bootstrap.goto(baseURL, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await waitForApp(bootstrap);
@@ -88,8 +85,8 @@ async function waitForApp(page) {
       profile: !!profile,
       sleepDiff: sim.result.diff.sleepChanges.added.length + sim.result.diff.sleepChanges.removed.length + sim.result.diff.sleepChanges.changed.length,
       capacityDelta: sim.result.diff.metrics.difference.usableCapacity,
-      assumptionsArray: Array.isArray(sim.result.assumptions),
-      explanationsArray: Array.isArray(sim.result.explanations),
+      assumptionsObject: !!sim.result.assumptions && typeof sim.result.assumptions === 'object' && !Array.isArray(sim.result.assumptions),
+      explanationsObject: !!sim.result.explanations && typeof sim.result.explanations === 'object' && Array.isArray(sim.result.explanations.reasons),
       deterministicMC: JSON.stringify(mc1) === JSON.stringify(mc2),
       mcSum: mc1.bucketsSum,
       workerSum: worker.result?.bucketsSum,
@@ -100,7 +97,7 @@ async function waitForApp(page) {
   assert(core.work && core.profile, 'Work Day overlay missing');
   assert(core.sleepDiff > 0, 'Previous-night sleep impact missing');
   assert(core.capacityDelta <= 0, 'Work Day did not reduce/hold usable capacity');
-  assert(core.assumptionsArray && core.explanationsArray, 'Forecast assumption/explanation collections unavailable');
+  assert(core.assumptionsObject && core.explanationsObject, 'Forecast assumption/explanation object contracts unavailable');
   assert(core.deterministicMC, 'Seeded Monte Carlo is not reproducible');
   assert(Math.abs(core.mcSum - 1) < 1e-9, 'Monte Carlo probability buckets invalid');
   assert(Math.abs(core.workerSum - 1) < 1e-9, 'Worker Monte Carlo probability buckets invalid');
@@ -143,8 +140,6 @@ async function waitForApp(page) {
   await page.evaluate(async () => { LifeOS.app.router.go('scenario'); await LifeOS.app.render(); });
   assert(!(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1)), '768px Scenario Lab horizontal overflow');
 
-  // Keyboard-only core workflow: navigate, open New Scenario, name/create it,
-  // then start Run using keyboard activation.
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.evaluate(async () => { LifeOS.app.router.go('dashboard'); await LifeOS.app.render(); });
   const scenarioNav = page.locator('#sideNav').getByRole('button', { name: 'Scenario Lab', exact: true });
