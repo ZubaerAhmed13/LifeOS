@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#2563eb">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./icons/icon-192.png">
+  <meta name="color-scheme" content="light dark">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob:; connect-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'">
+  <title>LifeOS 4.2 — Scenario Planning, Forecasting & Decision Simulation</title>
+  <link rel="stylesheet" href="./app.css">
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to main content</a>
+  <div class="shell">
+    <aside class="sidebar" id="sidebar" aria-label="Primary navigation">
+      <div class="brand"><span class="brand-mark" aria-hidden="true">L4</span><span>LifeOS</span></div>
+      <nav class="nav" id="sideNav"></nav>
+      <div class="sidebar-foot"><button class="btn primary" data-action="quick-add">Add</button><button class="btn" data-action="open-palette">Command</button></div>
+    </aside>
+    <div class="main">
+      <header class="topbar">
+        <button class="btn icon menu-button hidden" data-action="toggle-menu" aria-label="Open navigation">☰</button>
+        <div class="page-heading"><b id="pageTitle">Dashboard</b><small id="pageSubtitle">Your day at a glance</small></div>
+        <div class="top-search">
+          <span class="search-prefix" aria-hidden="true">⌕</span>
+          <input id="globalSearch" type="search" autocomplete="off" placeholder="Search LifeOS…" aria-label="Search tasks, projects, goals, events and notes" role="combobox" aria-autocomplete="list" aria-controls="searchResults" aria-expanded="false">
+          <span class="key-hint">/</span>
+          <div id="searchResults" class="search-popover" role="listbox" aria-label="Search results"></div>
+        </div>
+        <div class="top-actions">
+          <span class="offline-badge" title="Your working data is stored locally in this browser">● Offline · local</span>
+          <button class="btn icon" data-action="notifications" aria-label="Open notifications">♢<span id="notificationCount" class="badge-count hidden">0</span></button>
+          <button class="btn icon hide-mobile" data-action="open-palette" aria-label="Open command palette">⌘</button>
+        </div>
+      </header>
+      <main class="content" id="main-content" tabindex="-1">
+        <div class="quick-capture"><input id="quickCapture" placeholder="Quick capture — e.g. Submit report Friday 90 min" aria-label="Quick capture"><button class="btn primary" data-action="capture">Capture</button></div>
+        <div id="view" class="view" aria-live="polite"><div class="loading" aria-label="Loading"></div></div>
+      </main>
+    </div>
+  </div>
+  <nav class="mobile-nav" id="mobileNav" aria-label="Mobile navigation"></nav>
+  <div class="more-menu" id="moreMenu" aria-label="More navigation"></div>
+  <div id="toastPolite" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+  <div id="toastAssertive" class="toast-region" aria-live="assertive" aria-atomic="true"></div>
+  <dialog id="appDialog" aria-labelledby="dialogTitle"></dialog>
+  <dialog id="paletteDialog" class="palette-dialog" aria-label="Command palette">
+    <input id="paletteInput" class="palette-input" placeholder="Type a command…" autocomplete="off" aria-controls="paletteList" aria-activedescendant="">
+    <div id="paletteList" class="palette-list" role="listbox"></div>
+  </dialog>
+  <dialog id="notificationDialog" aria-labelledby="notificationTitle"></dialog>
+  <div id="focusOverlay" class="focus-overlay" role="dialog" aria-modal="true" aria-labelledby="focusTitle">
+    <div class="focus-card"><div class="muted">FOCUS SESSION</div><h1 id="focusTitle">Task</h1><div id="focusTimer" class="focus-timer">00:00:00</div><p id="focusPlan" class="muted"></p><div class="focus-actions"><button class="btn primary" data-action="focus-pause">Pause</button><button class="btn" data-action="focus-add">+15 min</button><button class="btn" data-action="focus-interruption">Interruption</button><button class="btn primary" data-action="focus-complete">Complete</button><button class="btn danger" data-action="focus-stop">Stop</button></div></div>
+  </div>
+  <input id="importInput" class="hidden" type="file" accept="application/json,.json">
+  <script src="./app.js" defer></script>
+</body>
+</html>
