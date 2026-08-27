@@ -1,0 +1,48 @@
+name: LifeOS 4.3 Keyboard Fixed Diagnostic
+
+on:
+  push:
+    branches: [verify-lifeos-430-ci]
+    paths: ['.github/workflows/lifeos-430-keyboard-fixed-debug.yml']
+  workflow_dispatch:
+
+jobs:
+  chromium:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Reconstruct exact release
+        run: bash verify-430/reconstruct-release.sh
+      - name: Prepare harness
+        run: |
+          base64 -d verify-430/harness-debug.b64 > /tmp/harness.xz
+          xz -dc /tmp/harness.xz > verify-430/debug.cjs
+          node --check verify-430/debug.cjs
+      - name: Install Chromium
+        run: |
+          npm install --no-save playwright@1.57.0
+          npx playwright install --with-deps chromium
+      - name: Start server
+        run: |
+          python3 -m http.server 4173 --bind 127.0.0.1 > /tmp/http.log 2>&1 &
+          for i in {1..30}; do curl -fsS http://127.0.0.1:4173/verify-430/pwa/index.html >/dev/null && exit 0; sleep 1; done
+          exit 1
+      - name: Run diagnostic
+        env:
+          BROWSER: chromium
+          BASE_URL: http://127.0.0.1:4173/verify-430/pwa/index.html
+          RESULT_PATH: verify-430/debug-fixed-result.json
+        run: node verify-430/debug.cjs
+      - name: Upload result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lifeos-430-keyboard-fixed-debug
+          path: |
+            verify-430/debug-fixed-result.json
+            /tmp/http.log
+          if-no-files-found: warn
