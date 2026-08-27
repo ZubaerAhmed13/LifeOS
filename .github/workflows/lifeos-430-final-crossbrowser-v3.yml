@@ -8,7 +8,7 @@ on:
       - '.github/workflows/lifeos-430-final-crossbrowser-v3.yml'
   workflow_dispatch:
 
-# deterministic harness revision 4: isolate service-worker lifecycle
+# deterministic harness revision 5: explicit Week responsive view
 jobs:
   certify:
     name: ${{ matrix.browser }}
