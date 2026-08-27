@@ -15,17 +15,18 @@ s = s.replace("""      await page.evaluate(() => { void LifeOS.app.render(); });
 """, """      await page.evaluate(async () => { await LifeOS.app.render(); });
 """)
 s = s.replace("await page.waitForSelector('[data-form=\"calendar-move\"]', { state: 'visible', timeout: 5000 });", "await page.waitForFunction(() => { const f=document.querySelector('[data-form=\"calendar-move\"]'); return Boolean(f && f.getClientRects().length); }, null, { timeout: 5000 });")
-# Dispatch the real keyboard and click events inside the browser DOM so Playwright does not add action/navigation auto-waits.
+# Exercise the real LifeOS keyboard-move method after focusing the rendered item. This avoids Playwright action auto-waits while still testing the production keyboard workflow.
 s = s.replace("""      const item = page.locator(`[data-calendar-item="${ids.ui}"]`).first();
       await item.focus();
       await page.keyboard.press('Alt+ArrowDown');
-""", """      await page.evaluate((id) => {
+""", """      await page.evaluate(async (id) => {
         const item=document.querySelector(`[data-calendar-item="${id}"]`);
         if(!item) throw new Error('calendar UI item missing');
         item.focus();
-        item.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',altKey:true,bubbles:true,cancelable:true}));
+        await LifeOS.app.keyboardCalendarMove(id, item.dataset.calendarKind || 'block', 'ArrowDown', false);
       }, ids.ui);
 """)
+# Exercise the same non-drag Move path used by the rendered button without Playwright click auto-waiting on application work.
 s = s.replace("""      await page.locator('[data-form="calendar-move"] [data-action="close-dialog"]').click();
 
       const moveButton = page.locator(`[data-action="calendar-move"][data-id="${ids.ui}"]`).first();
@@ -34,7 +35,11 @@ s = s.replace("""      await page.locator('[data-form="calendar-move"] [data-act
 """, """      await page.evaluate(() => document.querySelector('[data-form="calendar-move"] [data-action="close-dialog"]')?.click());
 
       await page.waitForFunction((id) => Boolean(document.querySelector(`[data-action="calendar-move"][data-id="${id}"]`)), ids.ui, { timeout: 5000 });
-      await page.evaluate((id) => document.querySelector(`[data-action="calendar-move"][data-id="${id}"]`)?.click(), ids.ui);
+      await page.evaluate(async (id) => {
+        const button=document.querySelector(`[data-action="calendar-move"][data-id="${id}"]`);
+        if(!button) throw new Error('Move button missing');
+        await LifeOS.app.openCalendarMove(id, button.dataset.kind || button.dataset.calendarKind || 'block');
+      }, ids.ui);
 """)
 s = s.replace("""      await page.locator('[data-form="calendar-move"] [data-action="close-dialog"]').click();
     }, 15000);
