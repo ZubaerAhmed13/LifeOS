@@ -8,6 +8,7 @@ on:
       - '.github/workflows/lifeos-430-final-crossbrowser-v3.yml'
   workflow_dispatch:
 
+# deterministic harness revision 2
 jobs:
   certify:
     name: ${{ matrix.browser }}
