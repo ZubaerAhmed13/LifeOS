@@ -8,7 +8,7 @@ on:
       - '.github/workflows/lifeos-430-final-crossbrowser-v3.yml'
   workflow_dispatch:
 
-# deterministic harness revision 5: explicit Week responsive view
+# deterministic harness revision 6: expected SW-abort console noise filtered
 jobs:
   certify:
     name: ${{ matrix.browser }}
@@ -22,49 +22,30 @@ jobs:
     steps:
       - name: Checkout verification branch
         uses: actions/checkout@v4
-
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-
       - name: Reconstruct exact fixed LifeOS 4.3 release
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p verify-430
-          cat \
-            verify-420/standalone/part00.txt \
-            verify-420/standalone/part01.txt \
-            verify-420/standalone/part02.txt \
-            verify-420/standalone/part03.txt \
-            verify-420/standalone/part04.txt \
-            verify-420/standalone/part05.txt \
-            verify-420/standalone/part06.txt \
-            verify-420/standalone/part07a.fix.txt \
-            verify-420/standalone/part07b.fix.txt \
-            verify-420/standalone/part08.txt \
-            verify-420/standalone/part09.txt \
-            verify-420/standalone/part10.txt \
-            verify-420/standalone/part11.txt \
-            verify-420/standalone/part12.txt > /tmp/lifeos-420.b64
+          cat verify-420/standalone/part00.txt verify-420/standalone/part01.txt verify-420/standalone/part02.txt verify-420/standalone/part03.txt verify-420/standalone/part04.txt verify-420/standalone/part05.txt verify-420/standalone/part06.txt verify-420/standalone/part07a.fix.txt verify-420/standalone/part07b.fix.txt verify-420/standalone/part08.txt verify-420/standalone/part09.txt verify-420/standalone/part10.txt verify-420/standalone/part11.txt verify-420/standalone/part12.txt > /tmp/lifeos-420.b64
           base64 -d /tmp/lifeos-420.b64 > /tmp/lifeos-420.html.gz
           gzip -dc /tmp/lifeos-420.html.gz > verify-420/LifeOS_4_2_Scenario_Forecasting_Standalone.html
           python3 verify-420/patch-webkit-offline-worker.py
           echo '154a7abd9c91d3af16973abe9d72dd95848bdb78d06958b49da7d70c9cd73df8  verify-420/LifeOS_4_2_Scenario_Forecasting_Standalone.html' | sha256sum -c -
-
           cp verify-420/LifeOS_4_2_Scenario_Forecasting_Standalone.html verify-430/LifeOS.html
           cat verify-430/patch/part-00.txt verify-430/patch/part-01.txt verify-430/patch/part-02.txt verify-430/patch/part-03.txt verify-430/patch/part-04.txt verify-430/patch/part-05.txt verify-430/patch/part-06.txt verify-430/patch/part-07.txt verify-430/patch/part-08.txt > /tmp/lifeos-430.patch.xz.b64
           base64 -d /tmp/lifeos-430.patch.xz.b64 > /tmp/lifeos-430.patch.xz
           xz -dc /tmp/lifeos-430.patch.xz > /tmp/lifeos-430.patch
           (cd verify-430 && patch -p1 --batch < /tmp/lifeos-430.patch)
           echo 'abc9506661e3df8deb9d272e848a47a3440cfa0445909398d11ce5feffc005cf  verify-430/LifeOS.html' | sha256sum -c -
-
           base64 -d verify-430/render-current-time-fix.patch.xz.b64 > /tmp/render-current-time-fix.patch.xz
           xz -dc /tmp/render-current-time-fix.patch.xz > /tmp/render-current-time-fix.patch
           (cd verify-430 && patch -p1 --batch < /tmp/render-current-time-fix.patch)
           echo 'acad7c10220c5b879ad4cf8abe5bea9173aed2c3112e7b77fbe8cd8aab671f50  verify-430/LifeOS.html' | sha256sum -c -
-
           rm -rf verify-430/pwa
           cp -R verify-420/pwa verify-430/pwa
           rm -rf verify-430/pwa/icons
@@ -72,58 +53,39 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           import re
-          source = Path('verify-430/LifeOS.html').read_text()
-          pwa = Path('verify-430/pwa')
-          css = re.search(r'<style>\n?(.*?)\n?</style>', source, re.S).group(1) + '\n'
-          js = re.search(r'<script>\n?(.*?)\n?</script>', source, re.S).group(1) + '\n'
-          (pwa / 'app.css').write_text(css)
-          (pwa / 'app.js').write_text(js)
-          index = (pwa / 'index.html').read_text().replace('LifeOS 4.2 — Scenario Planning, Forecasting & Decision Simulation','LifeOS 4.3 — Advanced Calendar & Interaction')
-          (pwa / 'index.html').write_text(index)
-          manifest = (pwa / 'manifest.webmanifest').read_text().replace('LifeOS 4.2.0 \\u2014 Scenario Planning, Forecasting & Decision Simulation','LifeOS 4.3.0 — Advanced Calendar & Interaction').replace('A local-first personal operating system with isolated scenario planning, deterministic forecasting, Monte Carlo simulation, adaptive scheduling, DST-aware civil time and safe decision simulation.','A local-first personal operating system with professional direct calendar manipulation, validated move/resize workflows, recurrence editing, scenario planning, adaptive scheduling and offline-first data safety.')
-          (pwa / 'manifest.webmanifest').write_text(manifest)
-          sw = (pwa / 'service-worker.js').read_text().replace("const APP_VERSION = '4.2.0';", "const APP_VERSION = '4.3.0';")
-          (pwa / 'service-worker.js').write_text(sw)
+          source=Path('verify-430/LifeOS.html').read_text(); pwa=Path('verify-430/pwa')
+          (pwa/'app.css').write_text(re.search(r'<style>\n?(.*?)\n?</style>',source,re.S).group(1)+'\n')
+          (pwa/'app.js').write_text(re.search(r'<script>\n?(.*?)\n?</script>',source,re.S).group(1)+'\n')
+          (pwa/'index.html').write_text((pwa/'index.html').read_text().replace('LifeOS 4.2 — Scenario Planning, Forecasting & Decision Simulation','LifeOS 4.3 — Advanced Calendar & Interaction'))
+          (pwa/'manifest.webmanifest').write_text((pwa/'manifest.webmanifest').read_text().replace('LifeOS 4.2.0 \\u2014 Scenario Planning, Forecasting & Decision Simulation','LifeOS 4.3.0 — Advanced Calendar & Interaction').replace('A local-first personal operating system with isolated scenario planning, deterministic forecasting, Monte Carlo simulation, adaptive scheduling, DST-aware civil time and safe decision simulation.','A local-first personal operating system with professional direct calendar manipulation, validated move/resize workflows, recurrence editing, scenario planning, adaptive scheduling and offline-first data safety.'))
+          (pwa/'service-worker.js').write_text((pwa/'service-worker.js').read_text().replace("const APP_VERSION = '4.2.0';", "const APP_VERSION = '4.3.0';"))
           PY
-
           echo '311de2b85f449315cf86549ca6be31294c02308e7e3b93a2153443b77f11e584  verify-430/pwa/app.js' | sha256sum -c -
           echo '205cc8db8ac2d960bfb027ae9bd21e5fa6748ce88d1816ada6f5bf3639affc57  verify-430/pwa/app.css' | sha256sum -c -
           echo '1278d641d555735ed80192e3b303643143f079c5d3db6f2afdcf1a638554c156  verify-430/pwa/index.html' | sha256sum -c -
           echo '133b8b268323c76efd6cfaa65c7101ecc56e1349f54c2b5f0d23dce53b367941  verify-430/pwa/manifest.webmanifest' | sha256sum -c -
           echo '13f8e77a2513685d661bc320e700e180a462dba55a7de728f05be05d63cc47ca  verify-430/pwa/service-worker.js' | sha256sum -c -
           echo 'e07357e200c62feb9601b5be7d45759de61d7740a15dcb60ecdd204c54b9d134  verify-430/pwa/planning-worker.js' | sha256sum -c -
-
           base64 -d verify-430/harness-v3.b64 > /tmp/lifeos-430-harness.xz
           xz -dc /tmp/lifeos-430-harness.xz > verify-430/crossbrowser.cjs
           node --check verify-430/crossbrowser.cjs
-
       - name: Install Playwright browser
         shell: bash
         run: |
           npm install --no-save playwright@1.57.0
           npx playwright install --with-deps ${{ matrix.browser }}
-
       - name: Start local LifeOS server
         shell: bash
         run: |
           python3 -m http.server 4173 --bind 127.0.0.1 > /tmp/lifeos-430-v3-http.log 2>&1 &
-          echo $! > /tmp/lifeos-430-v3-http.pid
-          for i in {1..30}; do
-            if curl -fsS http://127.0.0.1:4173/verify-430/pwa/index.html >/dev/null; then exit 0; fi
-            sleep 1
-          done
-          cat /tmp/lifeos-430-v3-http.log
-          exit 1
-
+          for i in {1..30}; do if curl -fsS http://127.0.0.1:4173/verify-430/pwa/index.html >/dev/null; then exit 0; fi; sleep 1; done
+          cat /tmp/lifeos-430-v3-http.log; exit 1
       - name: Run final v3 real-browser certification
-        shell: bash
         env:
           BROWSER: ${{ matrix.browser }}
           BASE_URL: http://127.0.0.1:4173/verify-430/pwa/index.html
           RESULT_PATH: verify-430/v3-result-${{ matrix.browser }}.json
-        run: |
-          node verify-430/crossbrowser.cjs
-
+        run: node verify-430/crossbrowser.cjs
       - name: Upload final v3 certification result
         if: always()
         uses: actions/upload-artifact@v4
