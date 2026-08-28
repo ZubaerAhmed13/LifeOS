@@ -58,8 +58,9 @@ const gate = async (name, fn, ms=20000) => {
       const info=await page.evaluate(()=>{const f=document.querySelector('[data-form="calendar-move"]');return {date:!!f.querySelector('[name="date"]'),time:!!f.querySelector('[name="startTime"]'),duration:!!f.querySelector('[name="duration"]'),title:document.querySelector('#appDialog')?.textContent||''};});
       assert(info.date&&info.time&&info.duration,'accessible Move fields missing'); assert(/Move/.test(info.title),'Move dialog title missing');
       await page.evaluate(()=>LifeOS.app.modal.close());
-      await page.evaluate(async()=>{LifeOS.app.setView('calendar'); await LifeOS.app.render();});
-      await page.waitForSelector('.calendar-timeline-grid',{timeout:8000});
+      const nav=page.locator('[data-view="calendar"]:visible').first();
+      await nav.click();
+      await page.waitForSelector('.calendar-timeline-grid',{state:'visible',timeout:8000});
       const ui=await page.evaluate(()=>({grid:!!document.querySelector('.calendar-timeline-grid'),actions:!!document.querySelector('.calendar-actions-button,.calendar-move-action'),live:!!document.querySelector('[aria-live]')}));
       assert(ui.grid,'timeline grid missing'); assert(ui.actions,'calendar move/action control missing'); assert(ui.live,'live region missing');
     });
