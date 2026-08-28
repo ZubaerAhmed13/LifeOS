@@ -40,16 +40,17 @@ const gate = async (name, fn, ms=20000) => {
     });
     await gate('move, invalid drop, undo and stale protection', async()=>{
       const r=await page.evaluate(async()=>{
-        const app=LifeOS.app, repo=app.repo, date=LifeOS.CoreUtil.localDate();
-        const block=await repo.save('timeBlocks',{id:'cert-block',title:'Certification block',type:'task',date,startTime:'10:00',endTime:'11:00',duration:60,revision:1,createdAt:LifeOS.CoreUtil.nowISO(),updatedAt:LifeOS.CoreUtil.nowISO(),sourceType:'user',sourceId:'cert-block'}, {validate:false});
+        const app=LifeOS.app, repo=app.repo, date=LifeOS.CoreUtil.localDate(), now=LifeOS.CoreUtil.nowISO();
+        const block=await repo.save('timeBlocks',{id:'cert-block',title:'Certification block',type:'task',date,startTime:'10:00',endTime:'11:00',duration:60,revision:1,createdAt:now,updatedAt:now,sourceType:'user',sourceId:'cert-block'}, {validate:false});
+        await repo.save('timeBlocks',{id:'cert-busy',title:'Locked certification conflict',type:'routine',date,startTime:'13:00',endTime:'14:00',duration:60,locked:true,manuallyPlaced:true,revision:1,createdAt:now,updatedAt:now,sourceType:'user',sourceId:'cert-busy'}, {validate:false});
         await app.calendarInteraction.commit({id:block.id,kind:'block',date,startTime:'11:00',duration:60,expectedRevision:block.revision});
         const moved=await repo.get('timeBlocks',block.id,{fresh:true});
-        const invalid=await app.calendarInteraction.preview({id:block.id,kind:'block',date,startTime:'23:45',duration:60});
+        const invalid=await app.calendarInteraction.preview({id:block.id,kind:'block',date,startTime:'13:00',duration:60});
         await app.undo.undo(); const undone=await repo.get('timeBlocks',block.id,{fresh:true});
         let stale=false; try{await app.calendarInteraction.commit({id:block.id,kind:'block',date,startTime:'12:00',duration:60,expectedRevision:999});}catch(e){stale=true;}
-        return {moved:moved.startTime,invalid:invalid.validation.valid,undone:undone.startTime,stale};
+        return {moved:moved.startTime,invalid:invalid.validation.valid,conflictCodes:(invalid.validation.conflicts||[]).map(x=>x.code),undone:undone.startTime,stale};
       });
-      assert(r.moved==='11:00','same-day move failed'); assert(r.invalid===false,'invalid drop accepted'); assert(r.undone==='10:00','Undo did not restore'); assert(r.stale,'stale revision was not rejected');
+      assert(r.moved==='11:00','same-day move failed'); assert(r.invalid===false,`hard conflict accepted (${r.conflictCodes.join(',')})`); assert(r.undone==='10:00','Undo did not restore'); assert(r.stale,'stale revision was not rejected');
     });
     await gate('keyboard Move dialog and calendar UI', async()=>{
       await page.evaluate(()=>{ LifeOS.app.keyboardCalendarMove('cert-block','block','ArrowDown',false); });
