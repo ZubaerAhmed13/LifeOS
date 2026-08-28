@@ -5,6 +5,7 @@ on:
     branches:
       - verify-lifeos-430-ci
     paths:
+      - 'verify-430/crossbrowser-v3.cjs'
       - '.github/workflows/lifeos-430-final-crossbrowser.yml'
   workflow_dispatch:
 
@@ -32,7 +33,6 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p verify-430
-          # Certification fixture v3.2 awaits keyboard Move setup and seeds a real hard conflict.
           cat \
             verify-420/standalone/part00.txt \
             verify-420/standalone/part01.txt \
