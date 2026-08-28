@@ -53,7 +53,7 @@ const gate = async (name, fn, ms=20000) => {
       assert(r.moved==='11:00','same-day move failed'); assert(r.invalid===false,`hard conflict accepted (${r.conflictCodes.join(',')})`); assert(r.undone==='10:00','Undo did not restore'); assert(r.stale,'stale revision was not rejected');
     });
     await gate('keyboard Move dialog and calendar UI', async()=>{
-      await page.evaluate(()=>{ LifeOS.app.keyboardCalendarMove('cert-block','block','ArrowDown',false); });
+      await page.evaluate(async()=>{ await LifeOS.app.keyboardCalendarMove('cert-block','block','ArrowDown',false); });
       await page.waitForSelector('[data-form="calendar-move"]',{state:'visible',timeout:8000});
       const info=await page.evaluate(()=>{const f=document.querySelector('[data-form="calendar-move"]');return {date:!!f.querySelector('[name="date"]'),time:!!f.querySelector('[name="startTime"]'),duration:!!f.querySelector('[name="duration"]'),title:document.querySelector('#appDialog')?.textContent||''};});
       assert(info.date&&info.time&&info.duration,'accessible Move fields missing'); assert(/Move/.test(info.title),'Move dialog title missing');
