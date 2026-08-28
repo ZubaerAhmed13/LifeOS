@@ -27,7 +27,7 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Reconstruct exact fixed LifeOS 4.3 release
+      - name: Reconstruct exact final LifeOS 4.3 release
         shell: bash
         run: |
           set -euo pipefail
@@ -64,6 +64,18 @@ jobs:
           (cd verify-430 && patch -p1 --batch < /tmp/render-current-time-fix.patch)
           echo 'acad7c10220c5b879ad4cf8abe5bea9173aed2c3112e7b77fbe8cd8aab671f50  verify-430/LifeOS.html' | sha256sum -c -
 
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('verify-430/LifeOS.html')
+          s = p.read_text()
+          old = "this.modal.open(`Move ${record.title||'calendar item'}`,body,'',{subtitle:'Validated by the same LifeOS planning rules used by scheduling.'});await this.refreshCalendarMovePreview(document.querySelector('[data-form=\"calendar-move\"]'))}"
+          new = "this.modal.open(`Move ${record.title||'calendar item'}`,body,'',{subtitle:'Validated by the same LifeOS planning rules used by scheduling.'});this.refreshCalendarMovePreview(document.querySelector('[data-form=\"calendar-move\"]')).catch(error=>this.notifyError(error,'CalendarMovePreview'))}"
+          if old not in s:
+              raise SystemExit('non-blocking Move dialog patch target missing')
+          p.write_text(s.replace(old, new, 1))
+          PY
+          echo '8f642044589ce98c992f6ef17c32212412f6db68673da399a83c3b58045c0bdd  verify-430/LifeOS.html' | sha256sum -c -
+
           rm -rf verify-430/pwa
           cp -R verify-420/pwa verify-430/pwa
           rm -rf verify-430/pwa/icons
@@ -91,7 +103,7 @@ jobs:
           (pwa / 'service-worker.js').write_text(sw)
           PY
 
-          echo '311de2b85f449315cf86549ca6be31294c02308e7e3b93a2153443b77f11e584  verify-430/pwa/app.js' | sha256sum -c -
+          echo '5e8d8b4056040182ca9587752f69429619cf740a1c4c51e33c770c7626bcbc69  verify-430/pwa/app.js' | sha256sum -c -
           echo '205cc8db8ac2d960bfb027ae9bd21e5fa6748ce88d1816ada6f5bf3639affc57  verify-430/pwa/app.css' | sha256sum -c -
           echo '1278d641d555735ed80192e3b303643143f079c5d3db6f2afdcf1a638554c156  verify-430/pwa/index.html' | sha256sum -c -
           echo '133b8b268323c76efd6cfaa65c7101ecc56e1349f54c2b5f0d23dce53b367941  verify-430/pwa/manifest.webmanifest' | sha256sum -c -
