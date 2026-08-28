@@ -32,7 +32,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p verify-430
-          # Certification fixture v3.1: hard-conflict validation is seeded in crossbrowser-v3.cjs.
+          # Certification fixture v3.2 awaits keyboard Move setup and seeds a real hard conflict.
           cat \
             verify-420/standalone/part00.txt \
             verify-420/standalone/part01.txt \
