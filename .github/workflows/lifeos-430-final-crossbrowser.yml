@@ -89,15 +89,9 @@ jobs:
           js = re.search(r'<script>\n?(.*?)\n?</script>', source, re.S).group(1) + '\n'
           (pwa / 'app.css').write_text(css)
           (pwa / 'app.js').write_text(js)
-          index = (pwa / 'index.html').read_text().replace(
-              'LifeOS 4.2 — Scenario Planning, Forecasting & Decision Simulation',
-              'LifeOS 4.3 — Advanced Calendar & Interaction')
+          index = (pwa / 'index.html').read_text().replace('LifeOS 4.2 — Scenario Planning, Forecasting & Decision Simulation','LifeOS 4.3 — Advanced Calendar & Interaction')
           (pwa / 'index.html').write_text(index)
-          manifest = (pwa / 'manifest.webmanifest').read_text().replace(
-              'LifeOS 4.2.0 \\u2014 Scenario Planning, Forecasting & Decision Simulation',
-              'LifeOS 4.3.0 — Advanced Calendar & Interaction').replace(
-              'A local-first personal operating system with isolated scenario planning, deterministic forecasting, Monte Carlo simulation, adaptive scheduling, DST-aware civil time and safe decision simulation.',
-              'A local-first personal operating system with professional direct calendar manipulation, validated move/resize workflows, recurrence editing, scenario planning, adaptive scheduling and offline-first data safety.')
+          manifest = (pwa / 'manifest.webmanifest').read_text().replace('LifeOS 4.2.0 \\u2014 Scenario Planning, Forecasting & Decision Simulation','LifeOS 4.3.0 — Advanced Calendar & Interaction').replace('A local-first personal operating system with isolated scenario planning, deterministic forecasting, Monte Carlo simulation, adaptive scheduling, DST-aware civil time and safe decision simulation.','A local-first personal operating system with professional direct calendar manipulation, validated move/resize workflows, recurrence editing, scenario planning, adaptive scheduling and offline-first data safety.')
           (pwa / 'manifest.webmanifest').write_text(manifest)
           sw = (pwa / 'service-worker.js').read_text().replace("const APP_VERSION = '4.2.0';", "const APP_VERSION = '4.3.0';")
           (pwa / 'service-worker.js').write_text(sw)
@@ -109,10 +103,7 @@ jobs:
           echo '133b8b268323c76efd6cfaa65c7101ecc56e1349f54c2b5f0d23dce53b367941  verify-430/pwa/manifest.webmanifest' | sha256sum -c -
           echo '13f8e77a2513685d661bc320e700e180a462dba55a7de728f05be05d63cc47ca  verify-430/pwa/service-worker.js' | sha256sum -c -
           echo 'e07357e200c62feb9601b5be7d45759de61d7740a15dcb60ecdd204c54b9d134  verify-430/pwa/planning-worker.js' | sha256sum -c -
-
-          base64 -d verify-430/harness-v2.b64 > /tmp/lifeos-430-harness.xz
-          xz -dc /tmp/lifeos-430-harness.xz > verify-430/crossbrowser.cjs
-          node --check verify-430/crossbrowser.cjs
+          node --check verify-430/crossbrowser-v3.cjs
 
       - name: Install Playwright browser
         shell: bash
@@ -139,7 +130,7 @@ jobs:
           BASE_URL: http://127.0.0.1:4173/verify-430/pwa/index.html
           RESULT_PATH: verify-430/final-result-${{ matrix.browser }}.json
         run: |
-          node verify-430/crossbrowser.cjs
+          node verify-430/crossbrowser-v3.cjs
 
       - name: Upload final certification result
         if: always()
