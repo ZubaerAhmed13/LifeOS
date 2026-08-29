@@ -27,32 +27,18 @@ test('manifest, icons, service worker and application shell are valid and cachea
   }
 });
 
-test('offline shell starts LifeOS and preserves IndexedDB data', async ({ page, context, browserName }) => {
+test('offline origin fallback starts LifeOS and preserves IndexedDB data', async ({ page, request }) => {
   const task = await createTask(page, 'Offline retained task');
   await page.evaluate(() => navigator.serviceWorker.ready);
   await expect.poll(() => page.evaluate(() => navigator.serviceWorker.controller?.state || '')).toBe('activated');
-  await context.setOffline(true);
+  await request.post('/__test/origin-mode', { data: 'offline' });
   try {
-    if (browserName === 'webkit') {
-      const shell = await page.evaluate(async () => {
-        const response = await fetch('/index.html');
-        return { status: response.status, html: await response.text(), controlled: Boolean(navigator.serviceWorker.controller) };
-      });
-      expect(shell).toMatchObject({ status: 200, controlled: true });
-      expect(shell.html).toContain('<title>LifeOS 4.4');
-      expect((await freshData(page)).tasks.some(item => item.id === task.id)).toBe(true);
-      return;
-    }
-    await page.evaluate(() => {
-      document.documentElement.dataset.offlineReloadPending = 'true';
-      setTimeout(() => location.reload(), 0);
-    });
-    await expect(page.locator('html')).not.toHaveAttribute('data-offline-reload-pending', 'true', { timeout: 20_000 });
+    await page.reload({ waitUntil: 'domcontentloaded' });
     await waitForApp(page);
     await expect(page.getByText('Offline retained task', { exact: true })).toBeVisible();
     expect((await freshData(page)).tasks.some(item => item.id === task.id)).toBe(true);
   } finally {
-    await context.setOffline(false);
+    await request.post('/__test/origin-mode', { data: 'online' });
   }
 });
 
