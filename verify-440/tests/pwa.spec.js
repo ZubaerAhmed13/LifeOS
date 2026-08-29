@@ -30,14 +30,14 @@ test('offline reload starts LifeOS and preserves IndexedDB data', async ({ page,
   const task = await createTask(page, 'Offline retained task');
   await page.evaluate(() => navigator.serviceWorker.ready);
   await context.setOffline(true);
-  const offlinePage = await context.newPage();
   try {
-    await offlinePage.goto('/index.html', { waitUntil: 'domcontentloaded' });
-    await waitForApp(offlinePage);
-    await expect(offlinePage.getByText('Offline retained task', { exact: true })).toBeVisible();
-    expect((await freshData(offlinePage)).tasks.some(item => item.id === task.id)).toBe(true);
+    const navigation = page.waitForNavigation({ waitUntil: 'domcontentloaded' });
+    await page.evaluate(() => location.reload());
+    await navigation;
+    await waitForApp(page);
+    await expect(page.getByText('Offline retained task', { exact: true })).toBeVisible();
+    expect((await freshData(page)).tasks.some(item => item.id === task.id)).toBe(true);
   } finally {
-    await offlinePage.close();
     await context.setOffline(false);
   }
 });
