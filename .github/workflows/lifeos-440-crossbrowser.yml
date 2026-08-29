@@ -1,0 +1,45 @@
+name: LifeOS 4.4 Cross-Browser Certification
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [verify-lifeos-440-ci]
+    paths:
+      - 'verify-440/**'
+      - '.github/workflows/lifeos-440-crossbrowser.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  certify:
+    name: ${{ matrix.browser }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    defaults:
+      run:
+        working-directory: verify-440
+    env:
+      LIFEOS_BROWSER: ${{ matrix.browser }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: npx playwright install --with-deps ${{ matrix.browser }}
+      - run: npm test
+      - name: Upload certification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lifeos-440-${{ matrix.browser }}-evidence
+          path: |
+            verify-440/reports
+            verify-440/test-results
+          if-no-files-found: warn
+          retention-days: 14
