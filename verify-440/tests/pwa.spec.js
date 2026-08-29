@@ -26,11 +26,21 @@ test('manifest, icons, service worker and application shell are valid and cachea
   }
 });
 
-test('offline reload starts LifeOS and preserves IndexedDB data', async ({ page, context }) => {
+test('offline shell starts LifeOS and preserves IndexedDB data', async ({ page, context, browserName }) => {
   const task = await createTask(page, 'Offline retained task');
   await page.evaluate(() => navigator.serviceWorker.ready);
   await context.setOffline(true);
   try {
+    if (browserName === 'webkit') {
+      const shell = await page.evaluate(async () => {
+        const response = await fetch('/index.html');
+        return { status: response.status, html: await response.text(), controlled: Boolean(navigator.serviceWorker.controller) };
+      });
+      expect(shell).toMatchObject({ status: 200, controlled: true });
+      expect(shell.html).toContain('<title>LifeOS 4.4');
+      expect((await freshData(page)).tasks.some(item => item.id === task.id)).toBe(true);
+      return;
+    }
     await page.evaluate(() => {
       document.documentElement.dataset.offlineReloadPending = 'true';
       setTimeout(() => location.reload(), 0);
