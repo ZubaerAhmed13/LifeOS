@@ -1,0 +1,110 @@
+name: LifeOS 4.3 Corrected Three-Engine Certification
+
+on:
+  push:
+    branches: [verify-lifeos-430-corrected-cert]
+    paths:
+      - 'cert-corrected/**'
+      - '.github/workflows/lifeos-430-corrected-certification.yml'
+  workflow_dispatch:
+
+jobs:
+  certify:
+    name: ${{ matrix.browser }} — 11-test suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+
+    steps:
+      - name: Checkout isolated verification branch
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Reconstruct and authenticate the corrected release
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash verify-430/reconstruct-release.sh
+          base64 -d cert-corrected/corrected-release.patch.xz.b64 > /tmp/corrected-release.patch.xz
+          xz -dc /tmp/corrected-release.patch.xz > /tmp/corrected-release.patch
+          (cd verify-430 && patch -p1 --batch < /tmp/corrected-release.patch)
+          echo 'aceadb01b3cb19569d4887630e98e18223d5d76d93aa62589be812d8af63c75d  verify-430/LifeOS.html' | sha256sum -c -
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          source = Path('verify-430/LifeOS.html').read_text()
+          match = re.search(r'<script>\n?(.*?)\n?</script>', source, re.S)
+          if not match:
+              raise SystemExit('Corrected standalone script was not found')
+          Path('verify-430/pwa/app.js').write_text(match.group(1) + '\n')
+          sw = Path('verify-430/pwa/service-worker.js')
+          sw.write_text(sw.read_text().replace("const CACHE_BUILD = 'pwa1';", "const CACHE_BUILD = 'pwa2';"))
+          PY
+          echo '0fdcd03db368aa8cdaae5e127d1d9dd4bbc7b925615a3e68c0007c8028b62a4a  verify-430/pwa/app.js' | sha256sum -c -
+          echo '205cc8db8ac2d960bfb027ae9bd21e5fa6748ce88d1816ada6f5bf3639affc57  verify-430/pwa/app.css' | sha256sum -c -
+          echo '1278d641d555735ed80192e3b303643143f079c5d3db6f2afdcf1a638554c156  verify-430/pwa/index.html' | sha256sum -c -
+          echo '133b8b268323c76efd6cfaa65c7101ecc56e1349f54c2b5f0d23dce53b367941  verify-430/pwa/manifest.webmanifest' | sha256sum -c -
+          echo '64da1f5bc24c6b9e795d6943478b030f9b6edada4e9dd058046f749ccb165549  verify-430/pwa/service-worker.js' | sha256sum -c -
+          echo 'e07357e200c62feb9601b5be7d45759de61d7740a15dcb60ecdd204c54b9d134  verify-430/pwa/planning-worker.js' | sha256sum -c -
+          node --check verify-430/pwa/app.js
+          node --check cert-corrected/calendar-430.spec.js
+          node --check cert-corrected/helpers.js
+          node --check cert-corrected/playwright.config.cjs
+
+      - name: Install Playwright and real browser engine
+        shell: bash
+        run: |
+          npm install --no-save @playwright/test@1.58.0
+          npx playwright install --with-deps ${{ matrix.browser }}
+
+      - name: Start corrected PWA server
+        shell: bash
+        run: |
+          python3 -m http.server 4173 --bind 127.0.0.1 --directory verify-430/pwa > /tmp/lifeos-430-corrected-http.log 2>&1 &
+          echo $! > /tmp/lifeos-430-corrected-http.pid
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:4173/index.html >/dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat /tmp/lifeos-430-corrected-http.log
+          exit 1
+
+      - name: Run complete corrected suite on ${{ matrix.browser }}
+        shell: bash
+        env:
+          BROWSER: ${{ matrix.browser }}
+          RESULT_PATH: cert-corrected/result-${{ matrix.browser }}.json
+        run: |
+          npx playwright test cert-corrected/calendar-430.spec.js \
+            --config=cert-corrected/playwright.config.cjs \
+            --project=${{ matrix.browser }}
+
+      - name: Record authenticated pass
+        if: success()
+        shell: bash
+        run: |
+          echo '### Corrected release: PASS' >> "$GITHUB_STEP_SUMMARY"
+          echo '- Browser engine: `${{ matrix.browser }}`' >> "$GITHUB_STEP_SUMMARY"
+          echo '- Suite: 11/11 tests passed' >> "$GITHUB_STEP_SUMMARY"
+          echo '- Standalone SHA-256: `aceadb01b3cb19569d4887630e98e18223d5d76d93aa62589be812d8af63c75d`' >> "$GITHUB_STEP_SUMMARY"
+          echo '- Modular app.js SHA-256: `0fdcd03db368aa8cdaae5e127d1d9dd4bbc7b925615a3e68c0007c8028b62a4a`' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload certification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lifeos-430-corrected-${{ matrix.browser }}-evidence
+          path: |
+            cert-corrected/result-${{ matrix.browser }}.json
+            cert-corrected/report-${{ matrix.browser }}/
+            cert-corrected/test-results-${{ matrix.browser }}/
+            /tmp/lifeos-430-corrected-http.log
+          if-no-files-found: warn
+          retention-days: 14
