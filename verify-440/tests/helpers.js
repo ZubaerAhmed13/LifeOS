@@ -46,18 +46,21 @@ async function resetApp(page) {
 
 async function navigate(page, label) {
   const desktop = page.locator('#sideNav').getByRole('button', { name: label, exact: true });
-  const box = await desktop.boundingBox().catch(() => null);
   const viewport = page.viewportSize();
-  const desktopUsable = box && viewport && box.x < viewport.width && box.x + box.width > 0 && box.y < viewport.height && box.y + box.height > 0;
-  if (desktopUsable) await desktop.click();
-  else {
+  let target = desktop;
+  if (viewport && viewport.width <= 820) {
     const mobile = page.locator('#mobileNav').getByRole('button', { name: label, exact: true });
-    if (await mobile.isVisible().catch(() => false)) await mobile.click();
+    if (await mobile.count()) target = mobile;
     else {
       await page.locator('#mobileNav').getByRole('button', { name: 'More', exact: true }).click();
-      await page.locator('#moreMenu').getByRole('button', { name: label, exact: true }).click();
+      await expect(page.locator('#moreMenu')).toHaveClass(/open/);
+      target = page.locator('#moreMenu').getByRole('button', { name: label, exact: true });
     }
   }
+  const view = await target.getAttribute('data-view');
+  await target.click();
+  await page.waitForFunction(expected => globalThis.LifeOS?.app?.router?.current() === expected, view);
+  await page.evaluate(() => globalThis.LifeOS.app.render());
   await expect(page.locator('#pageTitle')).toHaveText(label);
 }
 
