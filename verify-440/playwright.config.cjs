@@ -4,7 +4,7 @@ const browserName = process.env.LIFEOS_BROWSER || 'chromium';
 
 module.exports = defineConfig({
   testDir: './tests',
-  testMatch: ['calendar-430.spec.js', 'intelligence-440.spec.js'],
+  testMatch: ['calendar-430.spec.js', 'intelligence-440.spec.js', 'pwa.spec.js'],
   timeout: 90_000,
   expect: { timeout: 12_000 },
   fullyParallel: false,
