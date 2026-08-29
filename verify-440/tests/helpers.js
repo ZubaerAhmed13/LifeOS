@@ -54,7 +54,7 @@ async function navigate(page, label) {
     else {
       await page.locator('#mobileNav').getByRole('button', { name: 'More', exact: true }).click();
       await expect(page.locator('#moreMenu')).toHaveClass(/open/);
-      target = page.locator('#moreMenu').getByRole('button', { name: label, exact: true });
+      target = page.locator('#moreMenu [data-view]').filter({ hasText: label }).first();
     }
   }
   const view = await target.getAttribute('data-view');
