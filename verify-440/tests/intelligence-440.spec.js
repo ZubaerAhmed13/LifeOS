@@ -163,6 +163,8 @@ test.describe('LifeOS 4.4 Personal Intelligence', () => {
   });
 
   test('What Now exposes evidence without overriding feasibility', async ({ page }) => {
+    const today = await page.evaluate(() => LifeOS.CoreUtil.localDate());
+    await page.clock.setFixedTime(new Date(`${today}T12:00:00Z`));
     await seedIntelligenceHistory(page, { activeTask: true });
     await page.evaluate(async () => {
       const { app } = LifeOS;
