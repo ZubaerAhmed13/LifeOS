@@ -9,6 +9,7 @@ test.beforeEach(async ({ page, request }) => {
 test('manifest, icons, service worker and application shell are valid and cacheable', async ({ page, browserName }) => {
   const resources = ['/index.html', '/app.js', '/app.css', '/manifest.webmanifest', '/service-worker.js', '/planning-worker.js', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/icon-maskable-512.png'];
   for (const resource of resources) expect((await page.request.get(resource)).status(), resource).toBe(200);
+  await expect.poll(() => page.evaluate(async () => (await navigator.serviceWorker.ready).active?.state || '')).toBe('activated');
   const registration = await page.evaluate(async () => {
     const value = await navigator.serviceWorker.ready;
     return { scope: value.scope, active: value.active?.state, scriptURL: value.active?.scriptURL };
@@ -29,6 +30,7 @@ test('manifest, icons, service worker and application shell are valid and cachea
 test('offline shell starts LifeOS and preserves IndexedDB data', async ({ page, context, browserName }) => {
   const task = await createTask(page, 'Offline retained task');
   await page.evaluate(() => navigator.serviceWorker.ready);
+  await expect.poll(() => page.evaluate(() => navigator.serviceWorker.controller?.state || '')).toBe('activated');
   await context.setOffline(true);
   try {
     if (browserName === 'webkit') {
