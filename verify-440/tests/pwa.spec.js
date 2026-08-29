@@ -46,9 +46,11 @@ test('new cache build announces update, snapshots, activates, reloads and keeps 
   await expect.poll(async () => (await page.evaluate(() => globalThis.LifeOS.app.notifications.list())).some(item => item.title === 'Application update available')).toBe(true);
   await page.getByRole('button', { name: 'Open notifications' }).click();
   const updateRow = page.locator('.notification-row').filter({ hasText: 'Application update available' });
-  await updateRow.getByRole('button', { name: 'Open' }).click();
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: 'domcontentloaded' }),
+    updateRow.getByRole('button', { name: 'Open' }).click()
+  ]);
   await expect.poll(async () => (await page.evaluate(() => caches.keys())).includes('lifeos-shell-4.4.0-pwa2'), { timeout: 20_000 }).toBe(true);
-  await page.waitForLoadState('domcontentloaded');
   await waitForApp(page);
   expect((await freshData(page)).tasks.some(item => item.id === task.id)).toBe(true);
   const snapshots = await page.evaluate(() => globalThis.LifeOS.app.repo.all('snapshots', { fresh: true }));

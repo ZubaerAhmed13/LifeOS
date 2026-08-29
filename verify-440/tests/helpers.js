@@ -1,7 +1,7 @@
 const { expect } = require('playwright/test');
 
 async function waitForApp(page) {
-  await page.waitForFunction(() => globalThis.LifeOS?.app?.repo && document.querySelector('#view:not(.loading)'), null, { timeout: 20_000 });
+  await page.waitForFunction(() => globalThis.LifeOS?.app?.repo && document.querySelector('#view') && !document.querySelector('#view > .loading'), null, { timeout: 20_000 });
   await expect(page.locator('#pageTitle')).not.toHaveText('');
 }
 
