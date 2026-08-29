@@ -31,9 +31,11 @@ test('offline reload starts LifeOS and preserves IndexedDB data', async ({ page,
   await page.evaluate(() => navigator.serviceWorker.ready);
   await context.setOffline(true);
   try {
-    const navigation = page.waitForNavigation({ waitUntil: 'domcontentloaded' });
-    await page.evaluate(() => location.reload());
-    await navigation;
+    await page.evaluate(() => {
+      document.documentElement.dataset.offlineReloadPending = 'true';
+      setTimeout(() => location.reload(), 0);
+    });
+    await expect(page.locator('html')).not.toHaveAttribute('data-offline-reload-pending', 'true', { timeout: 20_000 });
     await waitForApp(page);
     await expect(page.getByText('Offline retained task', { exact: true })).toBeVisible();
     expect((await freshData(page)).tasks.some(item => item.id === task.id)).toBe(true);
