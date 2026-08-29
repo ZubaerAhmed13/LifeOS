@@ -46,7 +46,10 @@ async function resetApp(page) {
 
 async function navigate(page, label) {
   const desktop = page.locator('#sideNav').getByRole('button', { name: label, exact: true });
-  if (await desktop.isVisible().catch(() => false)) await desktop.click();
+  const box = await desktop.boundingBox().catch(() => null);
+  const viewport = page.viewportSize();
+  const desktopUsable = box && viewport && box.x < viewport.width && box.x + box.width > 0 && box.y < viewport.height && box.y + box.height > 0;
+  if (desktopUsable) await desktop.click();
   else {
     const mobile = page.locator('#mobileNav').getByRole('button', { name: label, exact: true });
     if (await mobile.isVisible().catch(() => false)) await mobile.click();

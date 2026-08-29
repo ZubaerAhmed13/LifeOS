@@ -92,7 +92,7 @@ test.describe('LifeOS 4.4 Personal Intelligence', () => {
     const card = page.locator('.intelligence-card').first();
     await expect(card).toBeVisible();
     await expect(card.locator('.pill')).toContainText(/Established pattern|Strong pattern/);
-    await expect(card.getByText(/observation/)).toBeVisible();
+    await expect(card.getByText(/^\d+ observations?$/).first()).toBeVisible();
     await expect(card.getByText('Why this matters')).toBeVisible();
   });
 
@@ -175,7 +175,8 @@ test.describe('LifeOS 4.4 Personal Intelligence', () => {
         }
       });
     });
-    await page.getByRole('button', { name: /What Now/i }).first().click();
+    await navigate(page, 'Today');
+    await page.locator('[data-action="what-now"]').click();
     await expect(page.locator('#appDialog')).toBeVisible();
     await expect(page.getByText(/Historical duration evidence|Limited historical evidence/)).toBeVisible();
     await expect(page.getByText('No calendar changes required')).toBeVisible();

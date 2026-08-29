@@ -11,6 +11,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: lifeos-440-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   certify:
     name: ${{ matrix.browser }}
