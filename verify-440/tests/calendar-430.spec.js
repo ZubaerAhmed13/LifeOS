@@ -29,7 +29,7 @@ async function showCalendar(page, date = '2031-01-17', mode = 'day') {
 test.describe('LifeOS 4.3 Advanced Calendar & Interaction', () => {
   test.beforeEach(async ({ page }) => { await resetApp(page); });
 
-  test('exports the 4.3 calendar engine without changing schema 16', async ({ page }) => {
+  test('preserves the 4.3 calendar engine without changing schema 16', async ({ page }) => {
     const info = await page.evaluate(() => ({
       app: LifeOS.version,
       calendar: LifeOS.calendarEngineVersion,
@@ -37,7 +37,7 @@ test.describe('LifeOS 4.3 Advanced Calendar & Interaction', () => {
       scheduler: LifeOS.schedulerVersion,
       forecast: LifeOS.forecastModelVersion
     }));
-    expect(info).toEqual({ app: '4.3.0', calendar: '4.3.0', schema: 16, scheduler: '4.1.0', forecast: '4.2.0' });
+    expect(info).toEqual({ app: '4.4.0', calendar: '4.3.0', schema: 16, scheduler: '4.1.0', forecast: '4.2.0' });
   });
 
   test('snap engine supports 5, 15, and 30 minute modes', async ({ page }) => {
