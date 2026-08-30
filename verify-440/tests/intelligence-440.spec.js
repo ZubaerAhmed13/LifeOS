@@ -288,7 +288,7 @@ test.describe('LifeOS 4.4 Personal Intelligence', () => {
       const comparison = JSON.parse(await page.locator('.evidence-json').textContent());
       expect(comparison.selected).toMatchObject({ postponed: 7, attempts: 18 });
       expect(comparison.comparable).toMatchObject({ postponed: 9, attempts: 52 });
-      await page.getByRole('button', { name: 'Close' }).focus();
+      await page.locator('#appDialog').getByRole('button', { name: 'Close' }).last().focus();
       await page.keyboard.press('Enter');
       await expect(page.locator('#appDialog')).not.toBeVisible();
       await card.getByRole('button', { name: 'Dismiss' }).focus();
@@ -310,7 +310,7 @@ test.describe('LifeOS 4.4 Personal Intelligence', () => {
     expect(comparison.heavy).toMatchObject({ days: 12, thresholdMinutes: 150 });
     expect(comparison.lighter).toMatchObject({ days: 12 });
     expect(comparison.lighter.medianPlanRealization - comparison.heavy.medianPlanRealization).toBeGreaterThan(.19);
-    await expect(page.getByText(/comparison stays within the stable Work Day profile identity/i)).toBeVisible();
+    await expect(page.locator('#appDialog').getByText(/comparison stays within the stable Work Day profile identity/i)).toBeVisible();
   });
 
   test('heterogeneous evidence remains scoped to 14 of 16 Study observations', async ({ page }) => {
@@ -319,11 +319,11 @@ test.describe('LifeOS 4.4 Personal Intelligence', () => {
     const card = page.locator('.intelligence-card').filter({ hasText: 'Study estimation' });
     await expect(card).toBeVisible();
     await expect(card.locator('.pill')).toContainText('Established pattern');
-    await expect(card.getByText('14 samples')).toBeVisible();
-    await expect(card.getByText('16 eligible')).toBeVisible();
+    await expect(card.locator('.insight-evidence').getByText('14 samples')).toBeVisible();
+    await expect(card.locator('.insight-evidence').getByText('16 eligible')).toBeVisible();
     await card.getByRole('button', { name: 'View evidence' }).click();
-    await expect(page.getByText('88%', { exact: true })).toBeVisible();
-    await expect(page.getByText(/84 unrelated observations were excluded from coverage/)).toBeVisible();
+    await expect(page.locator('#appDialog').getByText('88%', { exact: true })).toBeVisible();
+    await expect(page.locator('#appDialog').getByText(/84 unrelated observations were excluded from coverage/)).toBeVisible();
   });
 
   test('Simpson-style Energy reversal is labelled Mixed, never Established', async ({ page }) => {
@@ -336,7 +336,7 @@ test.describe('LifeOS 4.4 Personal Intelligence', () => {
     await card.getByRole('button', { name: 'View evidence' }).click();
     const comparison = JSON.parse(await page.locator('.evidence-json').textContent());
     expect(comparison.simpsonReversal).toBe(true);
-    await expect(page.getByText(/did not treat it as established/i)).toBeVisible();
+    await expect(page.locator('#appDialog').getByText(/did not treat it as established/i)).toBeVisible();
   });
 
   test('mobile Insights remains usable without document overflow', async ({ page }) => {
