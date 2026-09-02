@@ -1,0 +1,426 @@
+name: LifeOS 4.5 Final Rules Certification
+
+on:
+  push:
+    branches:
+      - main
+      - feature/lifeos-450-rules-automation
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: lifeos-450-final-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  exact_source:
+    name: Exact-source freeze gate
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout exact commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify all guarded generators are already fully applied
+        run: |
+          node scripts/apply-lifeos-450-core.mjs
+          node scripts/apply-lifeos-450-ui-tests-v2.mjs
+          node scripts/apply-lifeos-450-test-completion.mjs
+          node scripts/apply-lifeos-450-release-corrections.mjs
+          git diff --exit-code
+      - name: Parse frozen production JavaScript
+        run: |
+          node --check app.js
+          node --check service-worker.js
+          node --check planning-worker.js
+      - name: Verify frozen 4.5 release identity and safety invariants
+        run: |
+          grep -F "const APP_VERSION='4.5.0';" app.js
+          grep -F "const RULE_ENGINE_VERSION='4.5.0';" app.js
+          grep -F "const RULE_SCHEMA_VERSION=1;" app.js
+          grep -F "const INTELLIGENCE_MODEL_VERSION='4.4.2';" app.js
+          grep -F "const CALENDAR_ENGINE_VERSION='4.3.0';" app.js
+          grep -F "const FORECAST_MODEL_VERSION='4.2.0';" app.js
+          grep -F "const SCHEDULER_VERSION='4.1.0';" app.js
+          grep -F "const DB_SCHEMA_VERSION=16;" app.js
+          grep -F "earliestTomorrowSlot(task,context)" app.js
+          grep -F "No feasible slot tomorrow satisfies protected sleep" app.js
+          grep -F "RULE-SCHEDULE-013" app.js
+          grep -F "async pendingApprovals(){" app.js
+          grep -F "currentProposal=plan.proposedActions" app.js
+          grep -F "confirmed=false" app.js
+          grep -F "<h2>Awaiting approval</h2>" app.js
+          grep -F "earliest tomorrow resolves after protected sleep" app.js
+          ! grep -E '\beval\s*\(' app.js
+          ! grep -E '\bnew\s+Function\s*\(' app.js
+          echo "EXACT_SOURCE_SHA=${GITHUB_SHA}"
+
+  static:
+    name: Static QA
+    needs: exact_source
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run LifeOS 4.5 static release QA
+        run: node scripts/static-qa.mjs | tee static-qa.log
+      - name: Build parity package as a static gate
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: node scripts/build-release-450.mjs | tee build-parity.log
+      - name: Upload static evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: lifeos-450-static-qa
+          path: |
+            static-qa.log
+            build-parity.log
+            dist/BUILD_PROVENANCE.json
+            dist/SHA256SUMS.txt
+          retention-days: 30
+
+  browser:
+    name: ${{ matrix.browser }}
+    needs: exact_source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    env:
+      LIFEOS_BROWSER: ${{ matrix.browser }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build exact-source browser harness from retained certified 4.4 harness
+        shell: bash
+        run: |
+          git fetch origin verify-lifeos-440-ci:refs/remotes/origin/verify-lifeos-440-ci
+          git archive origin/verify-lifeos-440-ci verify-440 | tar -x
+          rm -rf verify-440/pwa
+          mkdir -p verify-440/pwa verify-440/reports
+          cp index.html app.js app.css planning-worker.js service-worker.js manifest.webmanifest verify-440/pwa/
+          cp -R icons verify-440/pwa/icons
+          cp tests/evidence-correctness.spec.js verify-440/tests/evidence-correctness.spec.js
+          cp tests/rules-450.spec.js verify-440/tests/rules-450.spec.js
+          cp tests/rule-performance-450.spec.js verify-440/tests/rule-performance-450.spec.js
+          cp tests/rule-approval-safety-450.spec.js verify-440/tests/rule-approval-safety-450.spec.js
+          node <<'NODE'
+          const fs = require('fs');
+          const replaceRequired = (source, oldValue, newValue, label) => {
+            if (source.includes(newValue)) return source;
+            if (!source.includes(oldValue)) throw new Error(`Harness alignment failed: ${label}`);
+            return source.replace(oldValue, newValue);
+          };
+          const configPath = 'verify-440/playwright.config.cjs';
+          let config = fs.readFileSync(configPath, 'utf8');
+          config = replaceRequired(
+            config,
+            "testMatch: ['calendar-430.spec.js', 'intelligence-440.spec.js', 'pwa.spec.js']",
+            "testMatch: ['calendar-430.spec.js', 'intelligence-440.spec.js', 'pwa.spec.js', 'evidence-correctness.spec.js', 'rules-450.spec.js', 'rule-performance-450.spec.js', 'rule-approval-safety-450.spec.js']",
+            'Playwright testMatch'
+          );
+          if (!config.includes('retries: 0')) throw new Error('Certification requires retries: 0.');
+          fs.writeFileSync(configPath, config);
+
+          const calendarPath = 'verify-440/tests/calendar-430.spec.js';
+          let calendar = fs.readFileSync(calendarPath, 'utf8');
+          calendar = calendar.replace(/app: '4\.4\.0'/g, "app: '4.5.0'");
+          fs.writeFileSync(calendarPath, calendar);
+
+          const intelligencePath = 'verify-440/tests/intelligence-440.spec.js';
+          let intelligence = fs.readFileSync(intelligencePath, 'utf8');
+          intelligence = intelligence.replace(/app: '4\.4\.0'/g, "app: '4.5.0'");
+          intelligence = intelligence.replace(/intelligence: '4\.4\.1'/g, "intelligence: '4.4.2'");
+          intelligence = intelligence.replace(/model 4\\\.4\\\.1/g, 'model 4\\.4\\.2');
+          fs.writeFileSync(intelligencePath, intelligence);
+
+          const pwaPath = 'verify-440/tests/pwa.spec.js';
+          let pwa = fs.readFileSync(pwaPath, 'utf8');
+          pwa = pwa.replaceAll('lifeos-shell-4.4.0-', 'lifeos-shell-4.5.0-');
+          fs.writeFileSync(pwaPath, pwa);
+
+          const packagePath = 'verify-440/package.json';
+          const pkg = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
+          pkg.name = 'lifeos-4-5-final-browser-certification';
+          pkg.version = '4.5.0';
+          fs.writeFileSync(packagePath, JSON.stringify(pkg, null, 2) + '\n');
+          NODE
+          grep -F "testMatch: ['calendar-430.spec.js', 'intelligence-440.spec.js', 'pwa.spec.js', 'evidence-correctness.spec.js', 'rules-450.spec.js', 'rule-performance-450.spec.js', 'rule-approval-safety-450.spec.js']" verify-440/playwright.config.cjs
+          grep -F 'retries: 0' verify-440/playwright.config.cjs
+          test "$(sha256sum app.js | awk '{print $1}')" = "$(sha256sum verify-440/pwa/app.js | awk '{print $1}')"
+      - name: Install certification dependencies
+        working-directory: verify-440
+        run: npm install --no-audit --no-fund
+      - name: Install real browser runtime
+        working-directory: verify-440
+        run: npx playwright install --with-deps ${{ matrix.browser }}
+      - name: Run full retained plus 4.5 browser certification
+        working-directory: verify-440
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p reports
+          npm test 2>&1 | tee "reports/${LIFEOS_BROWSER}-test.log"
+      - name: Write browser evidence summary from Playwright JSON
+        if: success()
+        working-directory: verify-440
+        shell: bash
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const browser = process.env.LIFEOS_BROWSER;
+          const report = JSON.parse(fs.readFileSync(`reports/${browser}-results.json`, 'utf8'));
+          const stats = report.stats || {};
+          const passed = Number(stats.expected || 0);
+          const failed = Number(stats.unexpected || 0);
+          const skipped = Number(stats.skipped || 0);
+          const flaky = Number(stats.flaky || 0);
+          if (failed || skipped || flaky) throw new Error(`Non-green result: passed=${passed} failed=${failed} skipped=${skipped} flaky=${flaky}`);
+          if (passed !== 52) throw new Error(`Expected 52 Playwright tests, got ${passed}.`);
+          const log = fs.readFileSync(`reports/${browser}-test.log`, 'utf8');
+          const internal = log.match(/LIFEOS_INTERNAL_SELF_TEST\s+(\d+)\/(\d+)\s+EvidenceComparison\s+(\d+\/\d+)/);
+          const ruleGroups = log.match(/LIFEOS_RULE_GROUPS\s+(.+)/);
+          const perf = [...log.matchAll(/LIFEOS_RULE_PERF[^\n]+/g)].map(match => match[0]);
+          const evidencePerf = log.match(/LIFEOS_10K_EVIDENCE[^\n]+/);
+          if (!internal) throw new Error('Missing internal self-test evidence marker.');
+          if (internal[1] !== internal[2] || Number(internal[2]) < 436) throw new Error(`Internal self-test not fully green: ${internal[1]}/${internal[2]}`);
+          if (internal[3] !== '7/7') throw new Error(`Evidence cohort group not 7/7: ${internal[3]}`);
+          if (!ruleGroups) throw new Error('Missing Rule group evidence marker.');
+          const groups = JSON.parse(ruleGroups[1]);
+          const badGroups = Object.entries(groups).filter(([, value]) => value.passed !== value.total);
+          if (badGroups.length) throw new Error(`Rule groups not fully green: ${JSON.stringify(badGroups)}`);
+          if (perf.length < 3) throw new Error('Missing 100/500/1000 Rule performance markers.');
+          for (const count of [100, 500, 1000]) if (!perf.some(line => line.includes(`count=${count} `))) throw new Error(`Missing performance marker for ${count} rules.`);
+          const lines = [
+            `browser=${browser}`,
+            `exact_sha=${process.env.GITHUB_SHA}`,
+            `passed=${passed}`,
+            `failed=${failed}`,
+            `skipped=${skipped}`,
+            `flaky=${flaky}`,
+            'retries=0',
+            `internal=${internal[1]}/${internal[2]}`,
+            `evidence_comparison=${internal[3]}`,
+            `rule_groups=${ruleGroups[1]}`,
+            ...(evidencePerf ? [evidencePerf[0]] : []),
+            ...perf
+          ];
+          fs.writeFileSync(`reports/${browser}-certification-summary.txt`, lines.join('\n') + '\n');
+          console.log(lines.join('\n'));
+          NODE
+      - name: Upload browser certification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lifeos-450-${{ matrix.browser }}-evidence
+          path: |
+            verify-440/reports
+            verify-440/test-results
+          if-no-files-found: warn
+          retention-days: 30
+
+  release_package:
+    name: Build authenticated 4.5 release package
+    needs: [exact_source, static, browser]
+    if: needs.exact_source.result == 'success' && needs.static.result == 'success' && needs.browser.result == 'success'
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Download browser certification evidence
+        uses: actions/download-artifact@v4
+        with:
+          pattern: lifeos-450-*-evidence
+          path: certification-evidence
+          merge-multiple: true
+      - name: Download static evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: lifeos-450-static-qa
+          path: static-evidence
+      - name: Build synchronized PWA and standalone from exact certified SHA
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: node scripts/build-release-450.mjs
+      - name: Verify all browser summaries are exact-SHA green
+        shell: bash
+        run: |
+          for browser in chromium firefox webkit; do
+            file="$(find certification-evidence -name "${browser}-certification-summary.txt" -print -quit)"
+            test -n "$file"
+            grep -F "browser=${browser}" "$file"
+            grep -F "exact_sha=${GITHUB_SHA}" "$file"
+            grep -F 'passed=52' "$file"
+            grep -F 'failed=0' "$file"
+            grep -F 'skipped=0' "$file"
+            grep -F 'flaky=0' "$file"
+            grep -F 'retries=0' "$file"
+            grep -F 'evidence_comparison=7/7' "$file"
+            grep -F 'LIFEOS_RULE_PERF count=100 ' "$file"
+            grep -F 'LIFEOS_RULE_PERF count=500 ' "$file"
+            grep -F 'LIFEOS_RULE_PERF count=1000 ' "$file"
+          done
+      - name: Create release archive and SHA-256 manifest
+        shell: bash
+        run: |
+          (cd dist && zip -r -9 ../LifeOS_4_5_Rules_Automation_Release.zip .)
+          cp dist/SHA256SUMS.txt FINAL_SHA256SUMS.txt
+          sha256sum LifeOS_4_5_Rules_Automation_Release.zip >> FINAL_SHA256SUMS.txt
+          sha256sum app.js app.css index.html service-worker.js planning-worker.js manifest.webmanifest >> FINAL_SHA256SUMS.txt
+          sha256sum dist/BUILD_PROVENANCE.json >> FINAL_SHA256SUMS.txt
+      - name: Collect exact GitHub Actions provenance
+        id: provenance
+        shell: bash
+        run: |
+          JOBS_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/jobs?per_page=100")"
+          ARTIFACTS_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100")"
+          job_id() { echo "$JOBS_JSON" | jq -r --arg NAME "$1" '.jobs[] | select(.name==$NAME) | .id' | head -n1; }
+          artifact_digest() { echo "$ARTIFACTS_JSON" | jq -r --arg NAME "$1" '.artifacts[] | select(.name==$NAME) | (.digest // "unavailable")' | head -n1; }
+          echo "static_job_id=$(job_id 'Static QA')" >> "$GITHUB_OUTPUT"
+          echo "chromium_job_id=$(job_id chromium)" >> "$GITHUB_OUTPUT"
+          echo "firefox_job_id=$(job_id firefox)" >> "$GITHUB_OUTPUT"
+          echo "webkit_job_id=$(job_id webkit)" >> "$GITHUB_OUTPUT"
+          echo "static_digest=$(artifact_digest lifeos-450-static-qa)" >> "$GITHUB_OUTPUT"
+          echo "chromium_digest=$(artifact_digest lifeos-450-chromium-evidence)" >> "$GITHUB_OUTPUT"
+          echo "firefox_digest=$(artifact_digest lifeos-450-firefox-evidence)" >> "$GITHUB_OUTPUT"
+          echo "webkit_digest=$(artifact_digest lifeos-450-webkit-evidence)" >> "$GITHUB_OUTPUT"
+      - name: Write final LifeOS 4.5 certification report
+        shell: bash
+        env:
+          STATIC_JOB_ID: ${{ steps.provenance.outputs.static_job_id }}
+          CHROMIUM_JOB_ID: ${{ steps.provenance.outputs.chromium_job_id }}
+          FIREFOX_JOB_ID: ${{ steps.provenance.outputs.firefox_job_id }}
+          WEBKIT_JOB_ID: ${{ steps.provenance.outputs.webkit_job_id }}
+          STATIC_DIGEST: ${{ steps.provenance.outputs.static_digest }}
+          CHROMIUM_DIGEST: ${{ steps.provenance.outputs.chromium_digest }}
+          FIREFOX_DIGEST: ${{ steps.provenance.outputs.firefox_digest }}
+          WEBKIT_DIGEST: ${{ steps.provenance.outputs.webkit_digest }}
+        run: |
+          chromium_summary="$(find certification-evidence -name 'chromium-certification-summary.txt' -print -quit)"
+          firefox_summary="$(find certification-evidence -name 'firefox-certification-summary.txt' -print -quit)"
+          webkit_summary="$(find certification-evidence -name 'webkit-certification-summary.txt' -print -quit)"
+          cat > LIFEOS_4_5_FINAL_RULES_AUTOMATION_CERTIFICATION_REPORT.md <<EOF
+          # LifeOS 4.5 Final Rules, Automation & Planning Policies Certification
+
+          - Exact certified source SHA: \`${GITHUB_SHA}\`
+          - Workflow run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+          - App: 4.5.0
+          - RuleEngine: 4.5.0
+          - Rule schema: 1
+          - Intelligence model: 4.4.2
+          - Calendar engine: 4.3.0
+          - Forecast model: 4.2.0
+          - Scheduler: 4.1.0
+          - DB schema: 16
+
+          ## Release gates
+
+          - Exact-source generator freeze: PASS
+          - Static QA and PWA/Standalone parity: PASS
+          - Retained evidence correctness: 7/7 PASS
+          - Internal self-tests: all PASS (minimum 436)
+          - Chromium: 52/52 PASS, retries 0
+          - Firefox: 52/52 PASS, retries 0
+          - WebKit: 52/52 PASS, retries 0
+          - Cross-browser Playwright total: 156/156 PASS
+          - Ask-before-applying approval persistence/UI/apply: PASS
+          - Stale approval rejection: PASS
+          - Earliest-tomorrow safe-slot resolution: PASS
+          - Protected sleep/fixed commitment avoidance: PASS
+          - Atomic task + time-block move with one Undo: PASS
+          - Rule performance 100/500/1000 fixtures: PASS
+          - No arbitrary eval/new Function: PASS
+
+          ## Job provenance
+
+          - Static QA job: ${STATIC_JOB_ID}
+          - Chromium job: ${CHROMIUM_JOB_ID}
+          - Firefox job: ${FIREFOX_JOB_ID}
+          - WebKit job: ${WEBKIT_JOB_ID}
+
+          ## Evidence artifact digests
+
+          - Static: ${STATIC_DIGEST}
+          - Chromium: ${CHROMIUM_DIGEST}
+          - Firefox: ${FIREFOX_DIGEST}
+          - WebKit: ${WEBKIT_DIGEST}
+
+          ## Browser summaries
+
+          ### Chromium
+          \`\`\`
+          $(cat "$chromium_summary")
+          \`\`\`
+
+          ### Firefox
+          \`\`\`
+          $(cat "$firefox_summary")
+          \`\`\`
+
+          ### WebKit
+          \`\`\`
+          $(cat "$webkit_summary")
+          \`\`\`
+          EOF
+      - name: Upload authenticated final package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lifeos-450-final-release-package
+          path: |
+            LifeOS_4_5_Rules_Automation_Release.zip
+            dist/LifeOS_4_5_Rules_Automation_Standalone.html
+            dist/BUILD_PROVENANCE.json
+            FINAL_SHA256SUMS.txt
+            LIFEOS_4_5_FINAL_RULES_AUTOMATION_CERTIFICATION_REPORT.md
+          retention-days: 90
+      - name: Publish GitHub Release from certified main SHA
+        if: github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          if gh release view v4.5.0 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            tag_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/v4.5.0" --jq '.object.sha')"
+            test "$tag_sha" = "$GITHUB_SHA"
+            echo "v4.5.0 already exists at the certified SHA; leaving it unchanged."
+          else
+            gh release create v4.5.0 \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "LifeOS 4.5.0 — Rules, Automation & Planning Policies" \
+              --notes-file LIFEOS_4_5_FINAL_RULES_AUTOMATION_CERTIFICATION_REPORT.md \
+              LifeOS_4_5_Rules_Automation_Release.zip \
+              dist/LifeOS_4_5_Rules_Automation_Standalone.html \
+              dist/BUILD_PROVENANCE.json \
+              FINAL_SHA256SUMS.txt \
+              LIFEOS_4_5_FINAL_RULES_AUTOMATION_CERTIFICATION_REPORT.md
+          fi
