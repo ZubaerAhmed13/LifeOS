@@ -49,16 +49,16 @@ jobs:
           const fs = require('fs');
           const path = 'scripts/apply-lifeos-450-ui-tests-v2.mjs';
           let source = fs.readFileSync(path, 'utf8');
-          const line = `app=replaceOnce(app,'<tr><th>Intelligence model</th><td>${INTELLIGENCE_MODEL_VERSION}</td></tr>','<tr><th>Intelligence model</th><td>${INTELLIGENCE_MODEL_VERSION}</td></tr><tr><th>Rule engine</th><td>${RULE_ENGINE_VERSION}</td></tr>','Settings Rule Engine identity');`;
-          const marker = `// Rule engine identity is verified by globals and certification; settings row insertion intentionally omitted.`;
-          if (source.includes(line)) {
-            source = source.replace(line, marker);
+          const marker = '// Rule engine identity is verified by globals and certification; settings row insertion intentionally omitted.';
+          if (!source.includes(marker)) {
+            const lines = source.split('\n');
+            const next = lines.filter(line => !line.includes("'Settings Rule Engine identity'"));
+            if (next.length === lines.length) throw new Error('Expected settings-only patch signature not found.');
+            source = next.join('\n').replace("app=insertBeforeOnce(app,'    async run(){this.results=[];'", marker + "\napp=insertBeforeOnce(app,'    async run(){this.results=[];'");
             fs.writeFileSync(path, source);
             console.log('Removed ambiguous settings-only patch anchor.');
-          } else if (source.includes(marker)) {
-            console.log('Ambiguous settings-only patch already removed.');
           } else {
-            throw new Error('Expected settings-only patch signature not found.');
+            console.log('Ambiguous settings-only patch already removed.');
           }
           NODE
       - name: Apply guarded 4.5 core patch
