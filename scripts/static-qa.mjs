@@ -38,6 +38,9 @@ add('Recovery unknown internal regression present', has("Evidence Comparison Coh
 add('Postponement 100 Admin regression present', has("Evidence Comparison Cohorts','Career time-window evidence ignores 100 unrelated Admin attempts"));
 add('Postponement 500 unrelated regression present', has("Evidence Comparison Cohorts','Career time-window evidence ignores 500 unrelated observations"));
 add('Load middle-band regression present', has("Evidence Comparison Cohorts','planned-load middle band does not inflate A-vs-B evidence"));
+add('retained dataset version assertion is 4.4.2', has("dataset.intelligenceModelVersion==='4.4.2'"));
+add('retained analysis version assertion is 4.4.2', has("analysis.intelligenceModelVersion==='4.4.2'"));
+add('retained Energy evidence assertion uses comparison cohort', has("Energy Stratification','comparison evidence excludes non-participants'"));
 
 for (const symbol of [
   'IntelligenceStatistics','IntelligenceConfidenceEngine','IntelligenceDatasetBuilder','PersonalIntelligenceEngine','PersonalBaselineEngine','StratifiedAssociationEngine',
@@ -49,7 +52,7 @@ for (const symbol of [
 add('planning worker protocol retained', worker.includes('LifeOSCompute'));
 add('service worker strict mode', sw.startsWith("'use strict';"));
 add('service worker app version 4.4.1', sw.includes("const APP_VERSION = '4.4.1';"));
-add('service worker cache build changed', sw.includes("const CACHE_BUILD = 'evidence-correctness-1';"));
+add('service worker cache build remains harness-compatible pwa1', sw.includes("const CACHE_BUILD = 'pwa1';"));
 add('service worker caches index', sw.includes("'./index.html'"));
 add('service worker caches app.css', sw.includes("'./app.css'"));
 add('service worker caches app.js', sw.includes("'./app.js'"));
