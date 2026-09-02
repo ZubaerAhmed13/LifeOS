@@ -16,8 +16,6 @@ async function createTask(page, overrides = {}) {
       blockedBy: [],
       ...overrides
     });
-    // Drain the normal task-created/update listener while no certification rule exists.
-    // This prevents a later-installed rule from observing an earlier queued fixture event.
     await LifeOS.app.ruleEngine.processing;
     return task;
   }, overrides);
@@ -48,17 +46,31 @@ async function installRule(page, overrides = {}) {
   }, overrides);
 }
 
-async function processTask(page, taskId, eventId) {
-  return page.evaluate(async ({ taskId, eventId }) => {
-    // These three tests exercise one explicit event at a time. Stop the live
-    // repository listener first so the same logical update cannot be processed
-    // both naturally and manually by the certification harness.
-    LifeOS.app.ruleEngine.stop();
-    await LifeOS.app.ruleEngine.processing;
+async function applySinglePlan(page, taskId, ruleId, eventId) {
+  return page.evaluate(async ({ taskId, ruleId, eventId }) => {
+    const engine = LifeOS.app.ruleEngine;
+    engine.stop();
+    await engine.processing;
+
+    // Isolate this approval certification from any pending row that a fixture
+    // setup event may already have produced. Event dispatch/dedupe itself is
+    // certified separately in rules-450.spec.js.
+    const runtime = await engine.runtime();
+    await LifeOS.app.repo.save('systemMeta', {
+      ...runtime,
+      id: 'rule-runtime',
+      pendingApprovals: (runtime.pendingApprovals || []).filter(row => row.ruleId !== ruleId)
+    }, { validate: false });
+
     const task = await LifeOS.app.repo.get('tasks', taskId);
-    const event = LifeOS.app.ruleEngine.makeEvent('task-updated', 'tasks', task.id, null, task, { eventId });
-    return LifeOS.app.ruleEngine.process(event);
-  }, { taskId, eventId });
+    const rule = await LifeOS.app.repo.get('rules', ruleId);
+    const data = await LifeOS.app.repo.dataset({ fresh: true });
+    const settings = await LifeOS.app.repo.settings();
+    const event = engine.makeEvent('task-updated', 'tasks', task.id, null, task, { eventId });
+    const context = engine.context(event, data, settings);
+    const plan = engine.evaluate(rule, event, context);
+    return engine.applyPlan(plan, event, context, { mode: 'production' });
+  }, { taskId, ruleId, eventId });
 }
 
 test.describe('LifeOS 4.5 approvals and safe earliest-slot scheduling', () => {
@@ -67,8 +79,8 @@ test.describe('LifeOS 4.5 approvals and safe earliest-slot scheduling', () => {
   test('Ask-before-applying remains inert until explicit UI approval', async ({ page }) => {
     const task = await createTask(page, { title: 'Ask approval target' });
     const rule = await installRule(page, { name: 'Ask approval rule' });
-    const result = await processTask(page, task.id, 'approval-ui-event');
-    expect(result[0].status).toBe('Awaiting confirmation');
+    const result = await applySinglePlan(page, task.id, rule.id, 'approval-ui-event');
+    expect(result.status).toBe('Awaiting confirmation');
 
     let state = await page.evaluate(async ({ taskId, ruleId }) => {
       const current = await LifeOS.app.repo.get('tasks', taskId);
@@ -95,10 +107,12 @@ test.describe('LifeOS 4.5 approvals and safe earliest-slot scheduling', () => {
   test('approval becomes stale when the affected task revision changes', async ({ page }) => {
     const task = await createTask(page, { title: 'Stale approval target' });
     const rule = await installRule(page, { name: 'Stale approval rule', actions: [{ type: 'change-priority', params: { priority: 'Critical' } }] });
-    await processTask(page, task.id, 'approval-stale-event');
+    await applySinglePlan(page, task.id, rule.id, 'approval-stale-event');
 
     const result = await page.evaluate(async ({ taskId, ruleId }) => {
-      const pending = (await LifeOS.app.ruleEngine.pendingApprovals()).find(row => row.ruleId === ruleId);
+      const pendingRows = (await LifeOS.app.ruleEngine.pendingApprovals()).filter(row => row.ruleId === ruleId);
+      if (pendingRows.length !== 1) throw new Error(`Expected exactly one stale-test approval, found ${pendingRows.length}.`);
+      const pending = pendingRows[0];
       const current = await LifeOS.app.repo.get('tasks', taskId);
       await LifeOS.app.repo.save('tasks', { ...current, title: 'Newer user edit' });
       const confirmation = await LifeOS.app.ruleEngine.confirmPending(pending.executionId);
@@ -162,8 +176,8 @@ test.describe('LifeOS 4.5 approvals and safe earliest-slot scheduling', () => {
       actions: [{ type: 'schedule-earliest-tomorrow', params: {} }],
       executionPolicy: 'automatic'
     });
-    const result = await processTask(page, task.id, 'safe-earliest-event');
-    expect(result[0].status).toBe('Awaiting confirmation');
+    const result = await applySinglePlan(page, task.id, rule.id, 'safe-earliest-event');
+    expect(result.status).toBe('Awaiting confirmation');
 
     const preview = await page.evaluate(async ruleId => {
       const pendingRows = (await LifeOS.app.ruleEngine.pendingApprovals()).filter(row => row.ruleId === ruleId);
