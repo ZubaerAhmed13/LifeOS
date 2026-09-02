@@ -1,6 +1,6 @@
 {
-  "name": "LifeOS 4.4.0 — Personal Intelligence",
-  "short_name": "LifeOS",
+  "name": "LifeOS 4.5 — Rules, Automation & Planning Policies",
+  "short_name": "LifeOS 4.5",
   "description": "A local-first personal operating system with transparent pattern learning, confidence-aware insights, adaptive planning, professional calendar workflows and offline-first data safety.",
   "id": "./",
   "start_url": "./index.html",
