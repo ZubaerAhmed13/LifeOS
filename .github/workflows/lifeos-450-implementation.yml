@@ -63,8 +63,10 @@ jobs:
           NODE
       - name: Apply guarded 4.5 core patch
         run: node scripts/apply-lifeos-450-core.mjs
-      - name: Apply guarded 4.5 UI and test patch
+      - name: Apply guarded 4.5 UI and base test patch
         run: node scripts/apply-lifeos-450-ui-tests-v2.mjs
+      - name: Apply required Rule Actions and Rule Notifications self-tests
+        run: node scripts/apply-lifeos-450-test-completion.mjs
       - name: Parse generated production JavaScript
         run: |
           node --check app.js
@@ -79,6 +81,8 @@ jobs:
           grep -F "class RuleEngine{" app.js
           grep -F "Rules & Automation" app.js
           grep -F "async runRule450Tests(repo)" app.js
+          grep -F "this.test('Rule Actions','registry actions are structured" app.js
+          grep -F "this.test('Rule Notifications','same logical notification" app.js
           ! grep -E '\beval\s*\(' app.js
           ! grep -E '\bnew\s+Function\s*\(' app.js
       - name: Commit generated 4.5 source when needed
@@ -92,7 +96,9 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app.js app.css service-worker.js index.html manifest.webmanifest scripts/apply-lifeos-450-core.mjs scripts/apply-lifeos-450-ui-tests-v2.mjs
+          git add app.js app.css service-worker.js index.html manifest.webmanifest \
+            scripts/apply-lifeos-450-core.mjs scripts/apply-lifeos-450-ui-tests-v2.mjs \
+            scripts/apply-lifeos-450-test-completion.mjs scripts/fragments/lifeos-450-tests.jsfrag
           git commit -m "chore: stabilize LifeOS 4.5 guarded generators"
           git push origin HEAD:${GITHUB_REF_NAME}
           echo "changed=true" >> "$GITHUB_OUTPUT"
