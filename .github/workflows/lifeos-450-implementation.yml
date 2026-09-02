@@ -46,8 +46,8 @@ jobs:
       - name: Apply guarded 4.5 core patch
         run: node scripts/apply-lifeos-450-core.mjs
       - name: Apply guarded 4.5 UI and test patch
-        run: node scripts/apply-lifeos-450-ui-tests.mjs
-      - name: Parse production JavaScript
+        run: node scripts/apply-lifeos-450-ui-tests-v2.mjs
+      - name: Parse generated production JavaScript
         run: |
           node --check app.js
           node --check service-worker.js
@@ -60,6 +60,7 @@ jobs:
           grep -F "const INTELLIGENCE_MODEL_VERSION='4.4.2';" app.js
           grep -F "class RuleEngine{" app.js
           grep -F "Rules & Automation" app.js
+          grep -F "async runRule450Tests(repo)" app.js
           ! grep -E '\beval\s*\(' app.js
           ! grep -E '\bnew\s+Function\s*\(' app.js
       - name: Commit generated 4.5 source when needed
