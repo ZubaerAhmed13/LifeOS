@@ -25,22 +25,21 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Make App constructor patch idempotent
+      - name: Normalize App constructor generator guard
         run: |
           node <<'NODE'
           const fs = require('fs');
           const path = 'scripts/apply-lifeos-450-core.mjs';
           let source = fs.readFileSync(path, 'utf8');
-          const current = `app = replaceOnce(app, "this.calendarScenarioUndo=[];this.calendarFocusKey=''}", "this.calendarScenarioUndo=[];this.calendarFocusKey='';this.ruleEngine=null;this.pendingRuleSuggestion=null;this.ruleTestResult=null}", 'App rule state');`;
           const replacement = `if(!app.includes("this.ruleEngine=null;this.pendingRuleSuggestion=null;this.ruleTestResult=null")) app = replaceOnce(app, "this.calendarScenarioUndo=[];this.calendarFocusKey=''}", "this.calendarScenarioUndo=[];this.calendarFocusKey='';this.ruleEngine=null;this.pendingRuleSuggestion=null;this.ruleTestResult=null}", 'App rule state');`;
-          if (source.includes(current)) {
-            source = source.replace(current, replacement);
-            fs.writeFileSync(path, source);
-            console.log('Made App constructor patch idempotent.');
-          } else if (source.includes(replacement)) {
-            console.log('App constructor patch is already idempotent.');
+          const pattern = /^.*app = replaceOnce\(app, "this\.calendarScenarioUndo=\[\];this\.calendarFocusKey=''\}", "this\.calendarScenarioUndo=\[\];this\.calendarFocusKey='';this\.ruleEngine=null;this\.pendingRuleSuggestion=null;this\.ruleTestResult=null\}", 'App rule state'\);$/m;
+          if (!pattern.test(source)) throw new Error('Expected App constructor generator signature not found.');
+          const next = source.replace(pattern, replacement);
+          if (next !== source) {
+            fs.writeFileSync(path, next);
+            console.log('Normalized App constructor generator guard.');
           } else {
-            throw new Error('Expected App constructor generator signature not found.');
+            console.log('App constructor generator guard already normalized.');
           }
           NODE
       - name: Remove ambiguous cosmetic settings anchor
@@ -67,6 +66,8 @@ jobs:
         run: node scripts/apply-lifeos-450-ui-tests-v2.mjs
       - name: Apply required Rule Actions and Rule Notifications self-tests
         run: node scripts/apply-lifeos-450-test-completion.mjs
+      - name: Apply release approval and safe-scheduling corrections
+        run: node scripts/apply-lifeos-450-release-corrections.mjs
       - name: Parse generated production JavaScript
         run: |
           node --check app.js
@@ -83,6 +84,11 @@ jobs:
           grep -F "async runRule450Tests(repo)" app.js
           grep -F "this.test('Rule Actions','registry actions are structured" app.js
           grep -F "this.test('Rule Notifications','same logical notification" app.js
+          grep -F "earliestTomorrowSlot(task,context)" app.js
+          grep -F "async pendingApprovals(){" app.js
+          grep -F "confirmed=false" app.js
+          grep -F "currentProposal=plan.proposedActions" app.js
+          grep -F "<h2>Awaiting approval</h2>" app.js
           ! grep -E '\beval\s*\(' app.js
           ! grep -E '\bnew\s+Function\s*\(' app.js
       - name: Commit generated 4.5 source when needed
@@ -98,7 +104,9 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add app.js app.css service-worker.js index.html manifest.webmanifest \
             scripts/apply-lifeos-450-core.mjs scripts/apply-lifeos-450-ui-tests-v2.mjs \
-            scripts/apply-lifeos-450-test-completion.mjs scripts/fragments/lifeos-450-tests.jsfrag
+            scripts/apply-lifeos-450-test-completion.mjs scripts/apply-lifeos-450-release-corrections.mjs \
+            scripts/fragments/lifeos-450-tests.jsfrag scripts/fragments/lifeos-450-safety-methods.jsfrag \
+            scripts/fragments/lifeos-450-pending-ui.jsfrag
           git commit -m "chore: stabilize LifeOS 4.5 guarded generators"
           git push origin HEAD:${GITHUB_REF_NAME}
           echo "changed=true" >> "$GITHUB_OUTPUT"
