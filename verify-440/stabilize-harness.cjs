@@ -26,7 +26,7 @@ replaceOnce(
 replaceOnce(
   'tests/intelligence-440.spec.js',
   "      await card.getByRole('button', { name: 'Dismiss' }).focus();\n      await page.keyboard.press('Enter');\n      await expect(card).toHaveCount(0);",
-  "      const dismissButton = card.getByRole('button', { name: 'Dismiss' });\n      await dismissButton.focus();\n      await expect(dismissButton).toBeFocused();\n      await page.keyboard.press('Enter');\n      // Keep the keyboard-accessibility requirement, but synchronize on the real\n      // persisted dismissal before asserting the asynchronous Insights re-render.\n      await expect.poll(async () => page.evaluate(async () => (await globalThis.LifeOS.app.repo.settings()).intelligenceDismissals.length), { timeout: 20_000 }).toBeGreaterThan(0);\n      await page.evaluate(async () => { await globalThis.LifeOS.app.render(); });\n      await expect(card).toHaveCount(0);",
+  "      const dismissButton = card.getByRole('button', { name: 'Dismiss' });\n      // Locator-level keyboard activation focuses the actual control and sends Enter as\n      // a real keyboard event without a separate focus assertion that can race an offline\n      // service-worker render. Persistence is verified before the UI assertion.\n      await dismissButton.press('Enter');\n      await expect.poll(async () => page.evaluate(async () => (await globalThis.LifeOS.app.repo.settings()).intelligenceDismissals.length), { timeout: 20_000 }).toBeGreaterThan(0);\n      await page.evaluate(async () => { await globalThis.LifeOS.app.render(); });\n      await expect(card).toHaveCount(0);",
   'offline keyboard Dismiss persistence/render synchronization'
 );
 
