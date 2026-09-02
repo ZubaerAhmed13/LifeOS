@@ -1,7 +1,7 @@
 const { test, expect } = require('@playwright/test');
 const { resetApp, waitForApp } = require('./helpers');
 
-test.describe('LifeOS 4.4.1 final evidence correctness', () => {
+test.describe('LifeOS 4.5 retained final evidence correctness', () => {
   test.beforeEach(async ({ page }) => resetApp(page));
 
   test('Energy 3/3/14 reports six comparison participants', async ({ page }) => {
@@ -27,7 +27,7 @@ test.describe('LifeOS 4.4.1 final evidence correctness', () => {
       };
     });
     expect(result).toEqual({
-      appVersion: '4.4.1',
+      appVersion: '4.5.0',
       intelligenceVersion: '4.4.2',
       sampleSize: 6,
       eligibleCount: 6,
@@ -77,7 +77,7 @@ test.describe('LifeOS 4.4.1 final evidence correctness', () => {
     expect(result.after.coverage).toBe(1);
   });
 
-  test('expanded deterministic self-test passes all evidence regressions', async ({ page }) => {
+  test('expanded deterministic self-test passes retained evidence and Rule 4.5 groups', async ({ page }) => {
     // The retained Storage and Compute fallback tests are deterministic only when
     // the corresponding optional browser facilities are absent. Force exactly
     // that environment without weakening or skipping those tests.
@@ -94,18 +94,32 @@ test.describe('LifeOS 4.4.1 final evidence correctness', () => {
     const report = await page.evaluate(async () => {
       const runner = new LifeOS.SelfTestRunner(LifeOS.app.repo);
       const value = await runner.run();
+      const requiredRuleGroups = [
+        'Rule Schema', 'Rule Trigger', 'Rule Conditions', 'Rule Actions', 'Rule Dry Run',
+        'Rule Safety', 'Rule Conflict Resolution', 'Rule Loop Prevention', 'Rule Atomic Execution',
+        'Rule Undo', 'Rule Concurrency', 'Rule Audit', 'Rule Notifications', 'Planning Policies',
+        'Rule Intelligence Integration', 'Rule Scenario Integration', 'Rule Backup', 'Rule Integrity',
+        'Rule Accessibility', 'Rule Privacy'
+      ];
       return {
         total: value.total,
         passed: value.passed,
         failed: value.results.filter(result => !result.pass).map(result => `${result.group}: ${result.name} — ${result.error || 'failed'}`),
-        evidenceGroup: value.groups['Evidence Comparison Cohorts'] || null
+        evidenceGroup: value.groups['Evidence Comparison Cohorts'] || null,
+        ruleGroups: Object.fromEntries(requiredRuleGroups.map(name => [name, value.groups[name] || null]))
       };
     });
     console.log(`LIFEOS_INTERNAL_SELF_TEST ${report.passed}/${report.total} EvidenceComparison ${report.evidenceGroup?.passed || 0}/${report.evidenceGroup?.total || 0}`);
+    console.log(`LIFEOS_RULE_GROUPS ${JSON.stringify(report.ruleGroups)}`);
     expect(report.failed).toEqual([]);
     expect(report.passed).toBe(report.total);
-    expect(report.total).toBeGreaterThanOrEqual(377);
+    expect(report.total).toBeGreaterThan(377);
     expect(report.evidenceGroup).toEqual({ passed: 7, total: 7 });
+    for (const [name, group] of Object.entries(report.ruleGroups)) {
+      expect(group, `${name} missing`).not.toBeNull();
+      expect(group.passed, `${name} not fully green`).toBe(group.total);
+      expect(group.total, `${name} has no tests`).toBeGreaterThan(0);
+    }
   });
 
   test('10k evidence analyses remain bounded and comparison-correct', async ({ page }) => {
