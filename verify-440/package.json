@@ -3,7 +3,7 @@
   "version": "4.4.0",
   "private": true,
   "scripts": {
-    "test": "playwright test --config=playwright.config.cjs"
+    "test": "node stabilize-harness.cjs && playwright test --config=playwright.config.cjs"
   },
   "devDependencies": {
     "@playwright/test": "1.58.2"
