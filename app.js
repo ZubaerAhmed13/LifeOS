@@ -956,9 +956,9 @@
       await this.test('Intelligence Dataset','raw source immutable',()=>{const before=CoreUtil.hash(data);IntelligenceDatasetBuilder.build(data,baseSettings,range);this.assert(CoreUtil.hash(data)===before)});
       await this.test('Intelligence Dataset','quality coverage exact',()=>this.assert(dataset.quality.durationCoverage===1&&dataset.quality.projectLinkCoverage===1&&dataset.quality.energyCoverage===1));
       await this.test('Intelligence Dataset','provenance policy explicit',()=>this.assert(dataset.provenancePolicy.execution.includes('focusSessions first')&&dataset.provenancePolicy.postponement.includes('activityLog')));
-      await this.test('Intelligence Dataset','model version attached',()=>this.assert(dataset.intelligenceModelVersion==='4.4.1'));
+      await this.test('Intelligence Dataset','model version attached',()=>this.assert(dataset.intelligenceModelVersion==='4.4.2'));
       const analysis=PersonalIntelligenceEngine.analyze(data,baseSettings,range);
-      await this.test('Personal Intelligence','analysis model version',()=>this.assert(analysis.intelligenceModelVersion==='4.4.1'));
+      await this.test('Personal Intelligence','analysis model version',()=>this.assert(analysis.intelligenceModelVersion==='4.4.2'));
       await this.test('Personal Intelligence','generation stable',()=>this.assert(PersonalIntelligenceEngine.generation(data)===PersonalIntelligenceEngine.generation(CoreUtil.clone(data))));
       await this.test('Personal Intelligence','cache reused',()=>this.assert(PersonalIntelligenceEngine.analyze(data,baseSettings,range)===analysis));
       await this.test('Personal Intelligence','cache invalidates on session change',()=>{const changed=CoreUtil.clone(data);changed.focusSessions[0].actualMinutes=70;this.assert(PersonalIntelligenceEngine.analyze(changed,baseSettings,range).cacheKey!==analysis.cacheKey)});
@@ -1008,7 +1008,7 @@
       const analyticalRow=(i,patch={})=>({...cohortBase,observationId:`analytical-${i}-${CoreUtil.hash(patch)}`,date:CoreUtil.addDays('2026-08-20',i),taskType:'Study',validEstimation:true,completed:true,estimateRatio:i<5?1:1.3,energyBefore:i<5?8:3,contextSwitchBefore:i>=5,recoveryMet:i<5,recoverySource:'Work',contextEligible:true,recoveryEligible:true,...patch});
       const genuineRows=Array.from({length:10},(_,i)=>analyticalRow(i));
       await this.test('Energy Stratification','genuine within-type signal can establish',()=>this.assert(PersonalIntelligenceEngine.energy({...dataset,observations:genuineRows})[0].evidence.level==='established'));
-      await this.test('Energy Stratification','coverage uses energy-eligible cohort',()=>{const rows=Array.from({length:20},(_,i)=>analyticalRow(i,{observationId:`energy-coverage-${i}`,energyBefore:i<8?8:i<15?3:null,estimateRatio:i<8?1:i<15?1.3:1.1})),value=PersonalIntelligenceEngine.energy({...dataset,observations:rows})[0];this.assert(value.evidence.sampleSize===15&&value.evidence.eligibleCount===20&&value.evidence.coverage===.75)});
+      await this.test('Energy Stratification','comparison evidence excludes non-participants',()=>{const rows=Array.from({length:20},(_,i)=>analyticalRow(i,{observationId:`energy-coverage-${i}`,energyBefore:i<8?8:i<15?3:null,estimateRatio:i<8?1:i<15?1.3:1.1})),value=PersonalIntelligenceEngine.energy({...dataset,observations:rows})[0];this.assert(value.evidence.sampleSize===15&&value.evidence.eligibleCount===15&&value.evidence.coverage===1&&value.comparison.fieldAvailable===15&&value.comparison.comparedSamples===15)});
       await this.test('Context Stratification','genuine within-type signal can establish',()=>this.assert(PersonalIntelligenceEngine.context({...dataset,observations:genuineRows})[0].evidence.level==='established'));
       await this.test('Recovery Stratification','genuine within-type signal can establish',()=>this.assert(PersonalIntelligenceEngine.recovery({...dataset,observations:genuineRows})[0].evidence.level==='established'));
       const simpsonEnergy=simpsonRows.map((row,i)=>analyticalRow(i,{...row,energyBefore:row.side==='A'?8:3})),mixedEnergy=PersonalIntelligenceEngine.energy({...dataset,observations:simpsonEnergy})[0];

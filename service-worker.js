@@ -1,7 +1,7 @@
 'use strict';
 
 const APP_VERSION = '4.4.1';
-const CACHE_BUILD = 'evidence-correctness-1';
+const CACHE_BUILD = 'pwa1';
 const SHELL_CACHE = `lifeos-shell-${APP_VERSION}-${CACHE_BUILD}`;
 const APP_SHELL = [
   './',
