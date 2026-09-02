@@ -1,20 +1,26 @@
 const { test, expect } = require('@playwright/test');
-const { resetApp, waitForApp, navigate } = require('./helpers');
+const { resetApp, navigate } = require('./helpers');
 
 async function createTask(page, overrides = {}) {
-  return page.evaluate(async overrides => LifeOS.app.repo.save('tasks', {
-    id: `rule-approval-task-${crypto.randomUUID()}`,
-    title: 'Approval safety task',
-    status: 'Next',
-    priority: 'Medium',
-    estimatedDuration: 30,
-    minimumSessionDuration: 15,
-    maximumSessionDuration: 90,
-    plannedMinutes: 0,
-    actualMinutes: 0,
-    blockedBy: [],
-    ...overrides
-  }), overrides);
+  return page.evaluate(async overrides => {
+    const task = await LifeOS.app.repo.save('tasks', {
+      id: `rule-approval-task-${crypto.randomUUID()}`,
+      title: 'Approval safety task',
+      status: 'Next',
+      priority: 'Medium',
+      estimatedDuration: 30,
+      minimumSessionDuration: 15,
+      maximumSessionDuration: 90,
+      plannedMinutes: 0,
+      actualMinutes: 0,
+      blockedBy: [],
+      ...overrides
+    });
+    // Drain the normal task-created/update listener while no certification rule exists.
+    // This prevents a later-installed rule from observing an earlier queued fixture event.
+    await LifeOS.app.ruleEngine.processing;
+    return task;
+  }, overrides);
 }
 
 async function installRule(page, overrides = {}) {
@@ -37,12 +43,18 @@ async function installRule(page, overrides = {}) {
       ...overrides
     });
     await LifeOS.app.ruleEngine.reindex();
+    await LifeOS.app.ruleEngine.processing;
     return rule;
   }, overrides);
 }
 
 async function processTask(page, taskId, eventId) {
   return page.evaluate(async ({ taskId, eventId }) => {
+    // These three tests exercise one explicit event at a time. Stop the live
+    // repository listener first so the same logical update cannot be processed
+    // both naturally and manually by the certification harness.
+    LifeOS.app.ruleEngine.stop();
+    await LifeOS.app.ruleEngine.processing;
     const task = await LifeOS.app.repo.get('tasks', taskId);
     const event = LifeOS.app.ruleEngine.makeEvent('task-updated', 'tasks', task.id, null, task, { eventId });
     return LifeOS.app.ruleEngine.process(event);
@@ -141,6 +153,7 @@ test.describe('LifeOS 4.5 approvals and safe earliest-slot scheduling', () => {
         travelAfter: 0,
         preparationTime: 0
       });
+      await LifeOS.app.ruleEngine.processing;
       return { today, tomorrow, blockId: block.id };
     }, task.id);
 
@@ -153,8 +166,11 @@ test.describe('LifeOS 4.5 approvals and safe earliest-slot scheduling', () => {
     expect(result[0].status).toBe('Awaiting confirmation');
 
     const preview = await page.evaluate(async ruleId => {
-      const pending = (await LifeOS.app.ruleEngine.pendingApprovals()).find(row => row.ruleId === ruleId);
+      const pendingRows = (await LifeOS.app.ruleEngine.pendingApprovals()).filter(row => row.ruleId === ruleId);
+      if (pendingRows.length !== 1) throw new Error(`Expected exactly one safe-scheduling approval, found ${pendingRows.length}.`);
+      const pending = pendingRows[0];
       const action = pending.proposedActions.find(row => row.type === 'schedule-earliest-tomorrow');
+      if (!action) throw new Error('Safe-scheduling approval is missing its resolved action.');
       return { executionId: pending.executionId, date: action.params.resolvedDate, time: action.params.resolvedTime, duration: action.params.duration, existingBlockId: action.params.existingBlockId };
     }, rule.id);
     expect(preview).toMatchObject({ date: fixture.tomorrow, time: '08:00', duration: 30, existingBlockId: fixture.blockId });
