@@ -25,22 +25,22 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Tighten guarded App constructor anchor
+      - name: Make App constructor patch idempotent
         run: |
           node <<'NODE'
           const fs = require('fs');
           const path = 'scripts/apply-lifeos-450-core.mjs';
           let source = fs.readFileSync(path, 'utf8');
-          const oldLine = `app = replaceOnce(app, "this.calendarFocusKey=''", "this.calendarFocusKey='';this.ruleEngine=null;this.pendingRuleSuggestion=null;this.ruleTestResult=null", 'App rule state');`;
-          const newLine = `app = replaceOnce(app, "this.calendarScenarioUndo=[];this.calendarFocusKey=''}", "this.calendarScenarioUndo=[];this.calendarFocusKey='';this.ruleEngine=null;this.pendingRuleSuggestion=null;this.ruleTestResult=null}", 'App rule state');`;
-          if (source.includes(oldLine)) {
-            source = source.replace(oldLine, newLine);
+          const current = `app = replaceOnce(app, "this.calendarScenarioUndo=[];this.calendarFocusKey=''}", "this.calendarScenarioUndo=[];this.calendarFocusKey='';this.ruleEngine=null;this.pendingRuleSuggestion=null;this.ruleTestResult=null}", 'App rule state');`;
+          const replacement = `if(!app.includes("this.ruleEngine=null;this.pendingRuleSuggestion=null;this.ruleTestResult=null")) app = replaceOnce(app, "this.calendarScenarioUndo=[];this.calendarFocusKey=''}", "this.calendarScenarioUndo=[];this.calendarFocusKey='';this.ruleEngine=null;this.pendingRuleSuggestion=null;this.ruleTestResult=null}", 'App rule state');`;
+          if (source.includes(current)) {
+            source = source.replace(current, replacement);
             fs.writeFileSync(path, source);
-            console.log('Tightened App constructor patch guard.');
-          } else if (source.includes(newLine)) {
-            console.log('App constructor patch guard already tightened.');
+            console.log('Made App constructor patch idempotent.');
+          } else if (source.includes(replacement)) {
+            console.log('App constructor patch is already idempotent.');
           } else {
-            throw new Error('Expected App constructor patcher signature not found.');
+            throw new Error('Expected App constructor generator signature not found.');
           }
           NODE
       - name: Remove ambiguous cosmetic settings anchor
@@ -93,7 +93,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add app.js app.css service-worker.js index.html manifest.webmanifest scripts/apply-lifeos-450-core.mjs scripts/apply-lifeos-450-ui-tests-v2.mjs
-          git commit -m "feat: implement LifeOS 4.5 rules automation core"
+          git commit -m "chore: stabilize LifeOS 4.5 guarded generators"
           git push origin HEAD:${GITHUB_REF_NAME}
           echo "changed=true" >> "$GITHUB_OUTPUT"
       - name: Gate result
