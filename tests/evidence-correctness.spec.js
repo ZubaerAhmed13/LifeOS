@@ -88,6 +88,7 @@ test.describe('LifeOS 4.4.1 final evidence correctness', () => {
         evidenceGroup: value.groups['Evidence Comparison Cohorts'] || null
       };
     });
+    console.log(`LIFEOS_INTERNAL_SELF_TEST ${report.passed}/${report.total} EvidenceComparison ${report.evidenceGroup?.passed || 0}/${report.evidenceGroup?.total || 0}`);
     expect(report.failed).toEqual([]);
     expect(report.passed).toBe(report.total);
     expect(report.total).toBeGreaterThanOrEqual(377);
@@ -98,15 +99,23 @@ test.describe('LifeOS 4.4.1 final evidence correctness', () => {
     const result = await page.evaluate(() => {
       const { PersonalIntelligenceEngine, CoreUtil } = LifeOS;
       const date = CoreUtil.localDate();
-      const rows = Array.from({ length: 10000 }, (_, i) => ({
-        observationId: `perf-${i}`, date, taskType: `Type-${i % 20}`,
-        validEstimation: true, completed: true, estimateRatio: i % 3 === 0 ? 1 : 1.25,
-        energyBefore: i % 10 < 3 ? 8 : i % 10 < 6 ? 3 : 5
-      }));
+      const rows = Array.from({ length: 10000 }, (_, i) => {
+        const bucket = i % 10, high = bucket < 3, low = bucket >= 3 && bucket < 6;
+        return {
+          observationId: `perf-${i}`,
+          date,
+          taskType: `Type-${Math.floor(i / 10) % 20}`,
+          validEstimation: true,
+          completed: true,
+          estimateRatio: high ? 1 : low ? 1.35 : 1.15,
+          energyBefore: high ? 8 : low ? 3 : 5
+        };
+      });
       const start = performance.now();
       const insight = PersonalIntelligenceEngine.energy({ observations: rows, range: { start: date, end: date } })[0];
       return { durationMs: performance.now() - start, sampleSize: insight.evidence.sampleSize, fieldAvailable: insight.comparison.fieldAvailable };
     });
+    console.log(`LIFEOS_10K_EVIDENCE durationMs=${result.durationMs.toFixed(2)} fieldAvailable=${result.fieldAvailable} comparisonSample=${result.sampleSize}`);
     expect(result.fieldAvailable).toBe(10000);
     expect(result.sampleSize).toBe(6000);
     expect(result.durationMs).toBeLessThan(5000);
