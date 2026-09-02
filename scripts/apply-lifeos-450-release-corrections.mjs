@@ -68,12 +68,13 @@ const improvedConfirm="    async confirmPending(executionId){const execute=async
 safety=replaceLine(safety,/^    async confirmPending\(executionId\)\{.*$/m,improvedConfirm,"currentProposal=plan.proposedActions",'pending approval stale-proposal guard');
 if(app.includes('    async confirmPending(executionId){'))app=replaceLine(app,/^    async confirmPending\(executionId\)\{.*$/m,improvedConfirm,"currentProposal=plan.proposedActions",'application pending approval stale-proposal guard');
 
-const planningAnchor='    async planningPolicies(){';
+const fragmentPlanningAnchor='    async planningPolicies(){';
+const appPendingAnchor="    async save(rule){return this.repo.save('rules',DataValidator.rule(rule))}";
 if(!app.includes('    async pendingApprovals(){')){
-  const cut=safety.indexOf(planningAnchor);
+  const cut=safety.indexOf(fragmentPlanningAnchor);
   if(cut<0)throw new Error('Pending approval fragment no longer contains planningPolicies anchor.');
   const pendingMethods=safety.slice(0,cut).trimEnd();
-  app=insertBefore(app,planningAnchor,pendingMethods,"async pendingApprovals(){",'RuleEngine pending approval methods');
+  app=insertBefore(app,appPendingAnchor,pendingMethods,"async pendingApprovals(){",'RuleEngine pending approval methods');
 }
 
 const detailOld="<li><b>${CoreUtil.escape(action.label)}</b>${action.risk==='HIGH'?' · High impact':''}</li>";
