@@ -60,6 +60,20 @@ jobs:
             console.log('Ambiguous settings-only patch already removed.');
           }
           NODE
+      - name: Normalize release-correction insertion anchors
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const path = 'scripts/apply-lifeos-450-release-corrections.mjs';
+          let source = fs.readFileSync(path, 'utf8');
+          const oldDecl = "const planningAnchor='    async planningPolicies(){';";
+          const newDecl = "const fragmentPlanningAnchor='    async planningPolicies(){';\nconst appPendingAnchor=\"    async save(rule){return this.repo.save('rules',DataValidator.rule(rule))}\";";
+          if (source.includes(oldDecl)) source = source.replace(oldDecl, newDecl);
+          source = source.replace('const cut=safety.indexOf(planningAnchor);', 'const cut=safety.indexOf(fragmentPlanningAnchor);');
+          source = source.replace("app=insertBefore(app,planningAnchor,pendingMethods,\"async pendingApprovals(){\",'RuleEngine pending approval methods');", "app=insertBefore(app,appPendingAnchor,pendingMethods,\"async pendingApprovals(){\",'RuleEngine pending approval methods');");
+          if (!source.includes('fragmentPlanningAnchor') || !source.includes('appPendingAnchor')) throw new Error('Release-correction anchor normalization failed.');
+          fs.writeFileSync(path, source);
+          NODE
       - name: Apply guarded 4.5 core patch
         run: node scripts/apply-lifeos-450-core.mjs
       - name: Apply guarded 4.5 UI and base test patch
