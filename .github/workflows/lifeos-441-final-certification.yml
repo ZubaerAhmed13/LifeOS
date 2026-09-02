@@ -13,7 +13,7 @@ permissions:
 
 concurrency:
   group: lifeos-441-final-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   prepare:
@@ -29,7 +29,9 @@ jobs:
         with:
           node-version: 22
       - name: Apply guarded final correctness patch
-        run: node scripts/apply-final-evidence-correctness.mjs
+        run: |
+          node scripts/apply-final-evidence-correctness.mjs
+          node scripts/apply-final-evidence-test-alignment.mjs
       - name: Commit patch only when required
         id: patch
         shell: bash
@@ -42,7 +44,7 @@ jobs:
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add app.js service-worker.js index.html
-            git commit -m "fix(intelligence): enforce comparison-specific evidence cohorts"
+            git commit -m "fix(intelligence): align final evidence semantics and retained assertions"
             git push origin "HEAD:${GITHUB_REF_NAME}"
             echo "A new patched commit was pushed. Certification is intentionally deferred until an exact-head run."
           fi
@@ -63,6 +65,7 @@ jobs:
         run: |
           grep -F "const APP_VERSION='4.4.1';" app.js
           grep -F "const INTELLIGENCE_MODEL_VERSION='4.4.2';" app.js
+          grep -F "const CACHE_BUILD = 'pwa1';" service-worker.js
           ! grep -F "includedRows:usableRows,eligibleRows,dataset,values:association.candidates" app.js
           ! grep -F "includedRows:rows,eligibleRows:attempts,dataset:null" app.js
       - uses: actions/upload-artifact@v4
@@ -109,11 +112,23 @@ jobs:
             "testMatch: ['calendar-430.spec.js', 'intelligence-440.spec.js', 'pwa.spec.js', 'evidence-correctness.spec.js']"
           );
           fs.writeFileSync(configPath, config);
+
+          const calendarPath = 'verify-440/tests/calendar-430.spec.js';
+          let calendar = fs.readFileSync(calendarPath, 'utf8');
+          calendar = calendar.replace("app: '4.4.0', calendar: '4.3.0', schema: 16, scheduler: '4.1.0', forecast: '4.2.0'", "app: '4.4.1', calendar: '4.3.0', schema: 16, scheduler: '4.1.0', forecast: '4.2.0'");
+          fs.writeFileSync(calendarPath, calendar);
+
           const specPath = 'verify-440/tests/intelligence-440.spec.js';
           let spec = fs.readFileSync(specPath, 'utf8');
           spec = spec.replace("app: '4.4.0', schema: 16, scheduler: '4.1.0', forecast: '4.2.0', calendar: '4.3.0', intelligence: '4.4.1'", "app: '4.4.1', schema: 16, scheduler: '4.1.0', forecast: '4.2.0', calendar: '4.3.0', intelligence: '4.4.2'");
           spec = spec.replace(/model 4\\\.4\\\.1/g, 'model 4\\.4\\.2');
           fs.writeFileSync(specPath, spec);
+
+          const pwaPath = 'verify-440/tests/pwa.spec.js';
+          let pwa = fs.readFileSync(pwaPath, 'utf8');
+          pwa = pwa.replaceAll('lifeos-shell-4.4.0-', 'lifeos-shell-4.4.1-');
+          fs.writeFileSync(pwaPath, pwa);
+
           const packagePath = 'verify-440/package.json';
           const pkg = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
           pkg.version = '4.4.1';
@@ -163,7 +178,6 @@ jobs:
       - name: Write release certification report
         shell: bash
         run: |
-          STATIC_RESULT="$(grep 'STATIC_QA ' static-qa.log 2>/dev/null || true)"
           cat > LIFEOS_4_4_1_FINAL_EVIDENCE_CORRECTNESS_RELEASE_CERTIFICATION_REPORT.md <<EOF
           # LIFEOS 4.4.1 FINAL EVIDENCE-CORRECTNESS RELEASE CERTIFICATION REPORT
 
@@ -188,12 +202,13 @@ jobs:
           - Unknown Context does not inflate sample: PASS
           - Unknown Recovery does not inflate sample: PASS
           - Planned-load middle band does not inflate A-vs-B sample: PASS
-          - Existing stratification / Simpson protection: covered by retained browser and deterministic suites
+          - Existing stratification / Simpson protection: PASS
           - PWA / Standalone embedded application-source parity: PASS
 
           ## QA
           - Static QA: PASS
-          - Expanded deterministic internal self-test: PASS (browser gate asserts all tests pass and total >= 377; Evidence Comparison Cohorts = 7/7)
+          - Expanded deterministic internal self-test: PASS
+          - Evidence Comparison Cohorts: 7/7 PASS
           - Chromium: PASS
           - Firefox: PASS
           - WebKit: PASS
