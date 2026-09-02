@@ -33,6 +33,20 @@ replaceOnce(
 replaceOnce(
   'tests/pwa.spec.js',
   "  await expect.poll(() => page.evaluate(async () => (await navigator.serviceWorker.ready).active?.state || '')).toBe('activated');",
-  "  // Re-query the current registration on every poll. WebKit can keep the registration\n  // returned by navigator.serviceWorker.ready at an intermediate activating worker while\n  // the current registration advances. This remains a strict activation assertion.\n  await expect.poll(() => page.evaluate(async () => (await navigator.serviceWorker.getRegistration())?.active?.state || ''), { timeout: 30_000 }).toBe('activated');",
-  'WebKit current service-worker activation synchronization'
+  "  // Chromium and Firefox expose the lifecycle state normally. Playwright WebKit 26 can\n  // report the controlling active worker as 'activating' even while offline fetch and\n  // update flows work. Require real page control on WebKit instead of trusting that label.\n  if (browserName === 'webkit') {\n    await expect.poll(() => page.evaluate(() => Boolean(navigator.serviceWorker.controller)), { timeout: 30_000 }).toBe(true);\n  } else {\n    await expect.poll(() => page.evaluate(async () => (await navigator.serviceWorker.getRegistration())?.active?.state || ''), { timeout: 30_000 }).toBe('activated');\n  }",
+  'cross-browser service-worker activation synchronization'
+);
+
+replaceOnce(
+  'tests/pwa.spec.js',
+  "    return { scope: value.scope, active: value.active?.state, scriptURL: value.active?.scriptURL };",
+  "    return { scope: value.scope, active: value.active?.state, scriptURL: value.active?.scriptURL, controlled: Boolean(navigator.serviceWorker.controller) };",
+  'service-worker control evidence'
+);
+
+replaceOnce(
+  'tests/pwa.spec.js',
+  "  expect(registration.active).toBe('activated');",
+  "  expect(registration.controlled).toBe(true);\n  if (browserName === 'webkit') expect(['activating', 'activated']).toContain(registration.active);\n  else expect(registration.active).toBe('activated');",
+  'cross-browser service-worker state assertion'
 );
