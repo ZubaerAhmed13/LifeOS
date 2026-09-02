@@ -29,3 +29,10 @@ replaceOnce(
   "      const dismissButton = card.getByRole('button', { name: 'Dismiss' });\n      await dismissButton.focus();\n      await expect(dismissButton).toBeFocused();\n      await page.keyboard.press('Enter');\n      // Keep the keyboard-accessibility requirement, but synchronize on the real\n      // persisted dismissal before asserting the asynchronous Insights re-render.\n      await expect.poll(async () => page.evaluate(async () => (await globalThis.LifeOS.app.repo.settings()).intelligenceDismissals.length), { timeout: 20_000 }).toBeGreaterThan(0);\n      await page.evaluate(async () => { await globalThis.LifeOS.app.render(); });\n      await expect(card).toHaveCount(0);",
   'offline keyboard Dismiss persistence/render synchronization'
 );
+
+replaceOnce(
+  'tests/pwa.spec.js',
+  "  await expect.poll(() => page.evaluate(async () => (await navigator.serviceWorker.ready).active?.state || '')).toBe('activated');",
+  "  // Re-query the current registration on every poll. WebKit can keep the registration\n  // returned by navigator.serviceWorker.ready at an intermediate activating worker while\n  // the current registration advances. This remains a strict activation assertion.\n  await expect.poll(() => page.evaluate(async () => (await navigator.serviceWorker.getRegistration())?.active?.state || ''), { timeout: 30_000 }).toBe('activated');",
+  'WebKit current service-worker activation synchronization'
+);
