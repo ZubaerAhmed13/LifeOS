@@ -43,6 +43,24 @@ jobs:
             throw new Error('Expected App constructor patcher signature not found.');
           }
           NODE
+      - name: Remove ambiguous cosmetic settings anchor
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const path = 'scripts/apply-lifeos-450-ui-tests-v2.mjs';
+          let source = fs.readFileSync(path, 'utf8');
+          const line = `app=replaceOnce(app,'<tr><th>Intelligence model</th><td>${INTELLIGENCE_MODEL_VERSION}</td></tr>','<tr><th>Intelligence model</th><td>${INTELLIGENCE_MODEL_VERSION}</td></tr><tr><th>Rule engine</th><td>${RULE_ENGINE_VERSION}</td></tr>','Settings Rule Engine identity');`;
+          const marker = `// Rule engine identity is verified by globals and certification; settings row insertion intentionally omitted.`;
+          if (source.includes(line)) {
+            source = source.replace(line, marker);
+            fs.writeFileSync(path, source);
+            console.log('Removed ambiguous settings-only patch anchor.');
+          } else if (source.includes(marker)) {
+            console.log('Ambiguous settings-only patch already removed.');
+          } else {
+            throw new Error('Expected settings-only patch signature not found.');
+          }
+          NODE
       - name: Apply guarded 4.5 core patch
         run: node scripts/apply-lifeos-450-core.mjs
       - name: Apply guarded 4.5 UI and test patch
@@ -74,7 +92,7 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app.js app.css service-worker.js index.html manifest.webmanifest scripts/apply-lifeos-450-core.mjs
+          git add app.js app.css service-worker.js index.html manifest.webmanifest scripts/apply-lifeos-450-core.mjs scripts/apply-lifeos-450-ui-tests-v2.mjs
           git commit -m "feat: implement LifeOS 4.5 rules automation core"
           git push origin HEAD:${GITHUB_REF_NAME}
           echo "changed=true" >> "$GITHUB_OUTPUT"
