@@ -60,21 +60,16 @@ jobs:
             console.log('Ambiguous settings-only patch already removed.');
           }
           NODE
-      - name: Normalize Rules action-dispatch generator and remove duplicate generated handlers
+      - name: Verify Rules action-dispatch generator guard and remove duplicate generated handlers
         run: |
           node <<'NODE'
           const fs = require('fs');
           const generatorPath = 'scripts/apply-lifeos-450-ui-tests-v2.mjs';
-          let generator = fs.readFileSync(generatorPath, 'utf8');
-          const oldPrefix = `app=replaceOnce(app,"case'quick-add':this.openQuickAdd();break;case'new-task':"`;
+          const generator = fs.readFileSync(generatorPath, 'utf8');
           const guardedPrefix = `if(!app.includes("case'new-rule':await this.openRule();break;")) app=replaceOnce(app,"case'quick-add':this.openQuickAdd();break;case'new-task':"`;
-          if (generator.includes(oldPrefix)) {
-            generator = generator.replace(oldPrefix, guardedPrefix);
-            fs.writeFileSync(generatorPath, generator);
-            console.log('Made Rules action-dispatch generator idempotent.');
-          } else if (!generator.includes(guardedPrefix)) {
-            throw new Error('Expected Rules action-dispatch generator signature not found.');
-          }
+          const duplicatePrefix = `if(!app.includes("case'new-rule':await this.openRule();break;")) if(!app.includes("case'new-rule':await this.openRule();break;"))`;
+          if (!generator.includes(guardedPrefix)) throw new Error('Rules action-dispatch generator is missing its idempotent guard.');
+          if (generator.includes(duplicatePrefix)) throw new Error('Rules action-dispatch generator contains duplicate guards.');
 
           const appPath = 'app.js';
           let app = fs.readFileSync(appPath, 'utf8');
