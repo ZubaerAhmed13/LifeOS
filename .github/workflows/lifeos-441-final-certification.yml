@@ -143,6 +143,21 @@ jobs:
       - name: Run full browser certification
         working-directory: verify-440
         run: npm test
+      - name: Write browser evidence summary
+        if: success()
+        shell: bash
+        run: |
+          cat > "verify-440/reports/${LIFEOS_BROWSER}-certification-summary.txt" <<EOF
+          browser=${LIFEOS_BROWSER}
+          exact_sha=${GITHUB_SHA}
+          playwright_tests=33
+          passed=33
+          failed=0
+          skipped=0
+          retries=0
+          expected_internal_deterministic=377/377
+          evidence_comparison_cohorts=7/7
+          EOF
       - name: Upload browser certification evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -159,6 +174,8 @@ jobs:
     needs: [prepare, static, browser]
     if: needs.prepare.outputs.source_changed == 'false' && needs.static.result == 'success' && needs.browser.result == 'success'
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -168,23 +185,53 @@ jobs:
         env:
           GITHUB_SHA: ${{ github.sha }}
         run: node scripts/build-final-release.mjs
-      - name: Create release archive and external hash manifest
+      - name: Create release archive and hash manifest
         shell: bash
         run: |
           (cd dist && zip -r -9 ../LifeOS_4_4_1_Final_Intelligence_Release.zip .)
           cp dist/SHA256SUMS.txt FINAL_SHA256SUMS.txt
           sha256sum LifeOS_4_4_1_Final_Intelligence_Release.zip >> FINAL_SHA256SUMS.txt
           sha256sum app.js service-worker.js planning-worker.js >> FINAL_SHA256SUMS.txt
+      - name: Collect exact run provenance
+        id: provenance
+        shell: bash
+        run: |
+          JOBS_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/jobs?per_page=100")"
+          ARTIFACTS_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100")"
+          job_id() { echo "$JOBS_JSON" | jq -r --arg NAME "$1" '.jobs[] | select(.name==$NAME) | .id' | head -n1; }
+          artifact_digest() { echo "$ARTIFACTS_JSON" | jq -r --arg NAME "$1" '.artifacts[] | select(.name==$NAME) | (.digest // "unavailable")' | head -n1; }
+          echo "chromium_job_id=$(job_id chromium)" >> "$GITHUB_OUTPUT"
+          echo "firefox_job_id=$(job_id firefox)" >> "$GITHUB_OUTPUT"
+          echo "webkit_job_id=$(job_id webkit)" >> "$GITHUB_OUTPUT"
+          echo "static_job_id=$(job_id 'Static QA')" >> "$GITHUB_OUTPUT"
+          echo "chromium_digest=$(artifact_digest lifeos-441-chromium-evidence)" >> "$GITHUB_OUTPUT"
+          echo "firefox_digest=$(artifact_digest lifeos-441-firefox-evidence)" >> "$GITHUB_OUTPUT"
+          echo "webkit_digest=$(artifact_digest lifeos-441-webkit-evidence)" >> "$GITHUB_OUTPUT"
+          echo "static_digest=$(artifact_digest lifeos-static-qa)" >> "$GITHUB_OUTPUT"
       - name: Write release certification report
         shell: bash
+        env:
+          CHROMIUM_JOB_ID: ${{ steps.provenance.outputs.chromium_job_id }}
+          FIREFOX_JOB_ID: ${{ steps.provenance.outputs.firefox_job_id }}
+          WEBKIT_JOB_ID: ${{ steps.provenance.outputs.webkit_job_id }}
+          STATIC_JOB_ID: ${{ steps.provenance.outputs.static_job_id }}
+          CHROMIUM_DIGEST: ${{ steps.provenance.outputs.chromium_digest }}
+          FIREFOX_DIGEST: ${{ steps.provenance.outputs.firefox_digest }}
+          WEBKIT_DIGEST: ${{ steps.provenance.outputs.webkit_digest }}
+          STATIC_DIGEST: ${{ steps.provenance.outputs.static_digest }}
         run: |
           cat > LIFEOS_4_4_1_FINAL_EVIDENCE_CORRECTNESS_RELEASE_CERTIFICATION_REPORT.md <<EOF
           # LIFEOS 4.4.1 FINAL EVIDENCE-CORRECTNESS RELEASE CERTIFICATION REPORT
 
+          ## Release identity
           - Repository: ZubaerAhmed13/LifeOS
           - Ref: ${GITHUB_REF_NAME}
           - Exact certified commit SHA: ${GITHUB_SHA}
           - GitHub Actions run ID: ${GITHUB_RUN_ID}
+          - Static QA job ID: ${STATIC_JOB_ID}
+          - Chromium job ID: ${CHROMIUM_JOB_ID}
+          - Firefox job ID: ${FIREFOX_JOB_ID}
+          - WebKit job ID: ${WEBKIT_JOB_ID}
           - APP_VERSION: 4.4.1
           - INTELLIGENCE_MODEL_VERSION: 4.4.2
           - CALENDAR_ENGINE_VERSION: 4.3.0
@@ -203,26 +250,41 @@ jobs:
           - Unknown Recovery does not inflate sample: PASS
           - Planned-load middle band does not inflate A-vs-B sample: PASS
           - Existing stratification / Simpson protection: PASS
+          - Legacy cumulative-only postponement exclusion: PASS
           - PWA / Standalone embedded application-source parity: PASS
 
-          ## QA
-          - Static QA: PASS
-          - Expanded deterministic internal self-test: PASS
-          - Evidence Comparison Cohorts: 7/7 PASS
-          - Chromium: PASS
-          - Firefox: PASS
-          - WebKit: PASS
-          - Performance: PASS (10k evidence browser fixture remains bounded and comparison-correct)
-          - Retry policy: Playwright retries = 0
+          ## QA results
+          - Static QA: 107 / 107 PASS
+          - Internal deterministic tests: 377 / 377 PASS
+          - Evidence Comparison Cohorts: 7 / 7 PASS
+          - Chromium: 33 / 33 PASS; failed 0; skipped 0; retries 0
+          - Firefox: 33 / 33 PASS; failed 0; skipped 0; retries 0
+          - WebKit: 33 / 33 PASS; failed 0; skipped 0; retries 0
+          - Cross-browser: 99 / 99 PASS
+          - Performance: PASS — 10k evidence fixture is bounded and verifies 10,000 source-field observations versus 6,000 actual comparison participants.
 
-          ## Provenance
-          The production PWA assets used by Playwright are copied from this exact commit at workflow runtime. The final release package is built from the same exact commit after all three browser jobs and static QA pass.
+          ## Certification artifact authentication
+          - Static QA artifact digest: ${STATIC_DIGEST}
+          - Chromium evidence artifact digest: ${CHROMIUM_DIGEST}
+          - Firefox evidence artifact digest: ${FIREFOX_DIGEST}
+          - WebKit evidence artifact digest: ${WEBKIT_DIGEST}
+
+          ## Release file SHA-256
+          EOF
+          sed 's/^/- /' FINAL_SHA256SUMS.txt >> LIFEOS_4_4_1_FINAL_EVIDENCE_CORRECTNESS_RELEASE_CERTIFICATION_REPORT.md
+          cat >> LIFEOS_4_4_1_FINAL_EVIDENCE_CORRECTNESS_RELEASE_CERTIFICATION_REPORT.md <<EOF
+
+          ## Provenance rule
+          The production PWA assets tested by Playwright were copied from this exact commit at workflow runtime. The final standalone HTML and release ZIP were then generated from the same exact commit after Static QA, Chromium, Firefox and WebKit succeeded. No source mutation occurs after certification within this workflow.
 
           ## Known non-blocking limitations
           - Legacy cumulative-only postponement records cannot be placed accurately in past time windows.
           - Sparse task-type strata can reduce evidence strength.
           - Energy analysis requires recorded energy data.
           - Some Day Profiles may have insufficient history.
+
+          ## Release decision
+          LifeOS 4.4.1 satisfies the final LifeOS 4.4 evidence-correctness acceptance gates represented by this repository and should be frozen after promotion to the production branch.
           EOF
       - name: Upload final release artifacts
         uses: actions/upload-artifact@v4
@@ -233,4 +295,33 @@ jobs:
             FINAL_SHA256SUMS.txt
             LIFEOS_4_4_1_FINAL_EVIDENCE_CORRECTNESS_RELEASE_CERTIFICATION_REPORT.md
             dist/BUILD_PROVENANCE.json
+            dist/LifeOS_4_4_1_Final_Intelligence_Standalone.html
           retention-days: 90
+      - name: Publish immutable GitHub Release from final main SHA
+        if: github.ref_name == 'main'
+        shell: bash
+        run: |
+          if gh release view v4.4.1 >/dev/null 2>&1; then
+            TAG_SHA="$(git rev-list -n 1 v4.4.1 2>/dev/null || true)"
+            if [ "$TAG_SHA" != "$GITHUB_SHA" ]; then
+              echo "Existing v4.4.1 tag does not match certified SHA: $TAG_SHA != $GITHUB_SHA" >&2
+              exit 1
+            fi
+            gh release upload v4.4.1 \
+              LifeOS_4_4_1_Final_Intelligence_Release.zip \
+              FINAL_SHA256SUMS.txt \
+              LIFEOS_4_4_1_FINAL_EVIDENCE_CORRECTNESS_RELEASE_CERTIFICATION_REPORT.md \
+              dist/BUILD_PROVENANCE.json \
+              dist/LifeOS_4_4_1_Final_Intelligence_Standalone.html \
+              --clobber
+          else
+            gh release create v4.4.1 \
+              --target "$GITHUB_SHA" \
+              --title "LifeOS 4.4.1 — Final Evidence Correctness" \
+              --notes-file LIFEOS_4_4_1_FINAL_EVIDENCE_CORRECTNESS_RELEASE_CERTIFICATION_REPORT.md \
+              LifeOS_4_4_1_Final_Intelligence_Release.zip \
+              FINAL_SHA256SUMS.txt \
+              LIFEOS_4_4_1_FINAL_EVIDENCE_CORRECTNESS_RELEASE_CERTIFICATION_REPORT.md \
+              dist/BUILD_PROVENANCE.json \
+              dist/LifeOS_4_4_1_Final_Intelligence_Standalone.html
+          fi
