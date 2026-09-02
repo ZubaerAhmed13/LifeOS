@@ -1,0 +1,221 @@
+name: LifeOS 4.4.1 Final Evidence Certification
+
+on:
+  push:
+    branches:
+      - main
+      - fix/lifeos-44-final-evidence-correctness
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: lifeos-441-final-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Prepare exact source
+    runs-on: ubuntu-latest
+    outputs:
+      source_changed: ${{ steps.patch.outputs.source_changed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply guarded final correctness patch
+        run: node scripts/apply-final-evidence-correctness.mjs
+      - name: Commit patch only when required
+        id: patch
+        shell: bash
+        run: |
+          if git diff --quiet -- app.js service-worker.js index.html; then
+            echo "source_changed=false" >> "$GITHUB_OUTPUT"
+            echo "Exact checked-out source already contains the final evidence patch."
+          else
+            echo "source_changed=true" >> "$GITHUB_OUTPUT"
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add app.js service-worker.js index.html
+            git commit -m "fix(intelligence): enforce comparison-specific evidence cohorts"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+            echo "A new patched commit was pushed. Certification is intentionally deferred until an exact-head run."
+          fi
+
+  static:
+    name: Static QA
+    needs: prepare
+    if: needs.prepare.outputs.source_changed == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Run release static QA
+        run: node scripts/static-qa.mjs | tee static-qa.log
+      - name: Verify exact app version and stale paths
+        run: |
+          grep -F "const APP_VERSION='4.4.1';" app.js
+          grep -F "const INTELLIGENCE_MODEL_VERSION='4.4.2';" app.js
+          ! grep -F "includedRows:usableRows,eligibleRows,dataset,values:association.candidates" app.js
+          ! grep -F "includedRows:rows,eligibleRows:attempts,dataset:null" app.js
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lifeos-static-qa
+          path: static-qa.log
+          retention-days: 30
+
+  browser:
+    name: ${{ matrix.browser }}
+    needs: prepare
+    if: needs.prepare.outputs.source_changed == 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    env:
+      LIFEOS_BROWSER: ${{ matrix.browser }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Reuse authenticated LifeOS 4.4 Playwright harness
+        shell: bash
+        run: |
+          git fetch origin verify-lifeos-440-ci:refs/remotes/origin/verify-lifeos-440-ci
+          git archive origin/verify-lifeos-440-ci verify-440 | tar -x
+          rm -rf verify-440/pwa
+          mkdir -p verify-440/pwa
+          cp index.html app.js app.css planning-worker.js service-worker.js manifest.webmanifest verify-440/pwa/
+          cp -R icons verify-440/pwa/icons
+          cp tests/evidence-correctness.spec.js verify-440/tests/evidence-correctness.spec.js
+          node <<'NODE'
+          const fs = require('fs');
+          const configPath = 'verify-440/playwright.config.cjs';
+          let config = fs.readFileSync(configPath, 'utf8');
+          config = config.replace(
+            "testMatch: ['calendar-430.spec.js', 'intelligence-440.spec.js', 'pwa.spec.js']",
+            "testMatch: ['calendar-430.spec.js', 'intelligence-440.spec.js', 'pwa.spec.js', 'evidence-correctness.spec.js']"
+          );
+          fs.writeFileSync(configPath, config);
+          const specPath = 'verify-440/tests/intelligence-440.spec.js';
+          let spec = fs.readFileSync(specPath, 'utf8');
+          spec = spec.replace("app: '4.4.0', schema: 16, scheduler: '4.1.0', forecast: '4.2.0', calendar: '4.3.0', intelligence: '4.4.1'", "app: '4.4.1', schema: 16, scheduler: '4.1.0', forecast: '4.2.0', calendar: '4.3.0', intelligence: '4.4.2'");
+          spec = spec.replace(/model 4\\\.4\\\.1/g, 'model 4\\.4\\.2');
+          fs.writeFileSync(specPath, spec);
+          const packagePath = 'verify-440/package.json';
+          const pkg = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
+          pkg.version = '4.4.1';
+          fs.writeFileSync(packagePath, JSON.stringify(pkg, null, 2) + '\n');
+          NODE
+      - name: Install certification dependencies
+        working-directory: verify-440
+        run: npm install --no-audit --no-fund
+      - name: Install real browser
+        working-directory: verify-440
+        run: npx playwright install --with-deps ${{ matrix.browser }}
+      - name: Run full browser certification
+        working-directory: verify-440
+        run: npm test
+      - name: Upload browser certification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lifeos-441-${{ matrix.browser }}-evidence
+          path: |
+            verify-440/reports
+            verify-440/test-results
+          if-no-files-found: warn
+          retention-days: 30
+
+  release_package:
+    name: Build authenticated release package
+    needs: [prepare, static, browser]
+    if: needs.prepare.outputs.source_changed == 'false' && needs.static.result == 'success' && needs.browser.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build synchronized PWA and standalone package
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+        run: node scripts/build-final-release.mjs
+      - name: Create release archive and external hash manifest
+        shell: bash
+        run: |
+          (cd dist && zip -r -9 ../LifeOS_4_4_1_Final_Intelligence_Release.zip .)
+          cp dist/SHA256SUMS.txt FINAL_SHA256SUMS.txt
+          sha256sum LifeOS_4_4_1_Final_Intelligence_Release.zip >> FINAL_SHA256SUMS.txt
+          sha256sum app.js service-worker.js planning-worker.js >> FINAL_SHA256SUMS.txt
+      - name: Write release certification report
+        shell: bash
+        run: |
+          STATIC_RESULT="$(grep 'STATIC_QA ' static-qa.log 2>/dev/null || true)"
+          cat > LIFEOS_4_4_1_FINAL_EVIDENCE_CORRECTNESS_RELEASE_CERTIFICATION_REPORT.md <<EOF
+          # LIFEOS 4.4.1 FINAL EVIDENCE-CORRECTNESS RELEASE CERTIFICATION REPORT
+
+          - Repository: ZubaerAhmed13/LifeOS
+          - Ref: ${GITHUB_REF_NAME}
+          - Exact certified commit SHA: ${GITHUB_SHA}
+          - GitHub Actions run ID: ${GITHUB_RUN_ID}
+          - APP_VERSION: 4.4.1
+          - INTELLIGENCE_MODEL_VERSION: 4.4.2
+          - CALENDAR_ENGINE_VERSION: 4.3.0
+          - FORECAST_MODEL_VERSION: 4.2.0
+          - SCHEDULER_VERSION: 4.1.0
+          - DB_SCHEMA_VERSION: 16
+
+          ## Correctness gates
+          - Postponement comparison-specific cohorts: PASS
+          - Career time-window invariance with 100 unrelated Admin attempts: PASS
+          - Career time-window invariance with 500 unrelated observations: PASS
+          - Paired association uses actual comparison candidates: PASS
+          - Energy 3 High / 3 Low / 14 Medium comparison sample = 6: PASS
+          - Energy medium-band invariance: PASS
+          - Unknown Context does not inflate sample: PASS
+          - Unknown Recovery does not inflate sample: PASS
+          - Planned-load middle band does not inflate A-vs-B sample: PASS
+          - Existing stratification / Simpson protection: covered by retained browser and deterministic suites
+          - PWA / Standalone embedded application-source parity: PASS
+
+          ## QA
+          - Static QA: PASS
+          - Expanded deterministic internal self-test: PASS (browser gate asserts all tests pass and total >= 377; Evidence Comparison Cohorts = 7/7)
+          - Chromium: PASS
+          - Firefox: PASS
+          - WebKit: PASS
+          - Performance: PASS (10k evidence browser fixture remains bounded and comparison-correct)
+          - Retry policy: Playwright retries = 0
+
+          ## Provenance
+          The production PWA assets used by Playwright are copied from this exact commit at workflow runtime. The final release package is built from the same exact commit after all three browser jobs and static QA pass.
+
+          ## Known non-blocking limitations
+          - Legacy cumulative-only postponement records cannot be placed accurately in past time windows.
+          - Sparse task-type strata can reduce evidence strength.
+          - Energy analysis requires recorded energy data.
+          - Some Day Profiles may have insufficient history.
+          EOF
+      - name: Upload final release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: LifeOS_4_4_1_Final_Intelligence_Release
+          path: |
+            LifeOS_4_4_1_Final_Intelligence_Release.zip
+            FINAL_SHA256SUMS.txt
+            LIFEOS_4_4_1_FINAL_EVIDENCE_CORRECTNESS_RELEASE_CERTIFICATION_REPORT.md
+            dist/BUILD_PROVENANCE.json
+          retention-days: 90
