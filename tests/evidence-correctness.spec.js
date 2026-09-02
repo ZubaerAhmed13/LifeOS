@@ -77,6 +77,23 @@ test.describe('LifeOS 4.4.1 final evidence correctness', () => {
     expect(result.after.coverage).toBe(1);
   });
 
+  test('expanded deterministic self-test passes all evidence regressions', async ({ page }) => {
+    const report = await page.evaluate(async () => {
+      const runner = new LifeOS.SelfTestRunner(LifeOS.app.repo);
+      const value = await runner.run();
+      return {
+        total: value.total,
+        passed: value.passed,
+        failed: value.results.filter(result => !result.pass).map(result => `${result.group}: ${result.name} — ${result.error || 'failed'}`),
+        evidenceGroup: value.groups['Evidence Comparison Cohorts'] || null
+      };
+    });
+    expect(report.failed).toEqual([]);
+    expect(report.passed).toBe(report.total);
+    expect(report.total).toBeGreaterThanOrEqual(377);
+    expect(report.evidenceGroup).toEqual({ passed: 7, total: 7 });
+  });
+
   test('10k evidence analyses remain bounded and comparison-correct', async ({ page }) => {
     const result = await page.evaluate(() => {
       const { PersonalIntelligenceEngine, CoreUtil } = LifeOS;
