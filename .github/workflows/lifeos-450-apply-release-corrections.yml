@@ -1,0 +1,38 @@
+name: Apply LifeOS 4.5 Release Corrections
+
+on:
+  push:
+    branches:
+      - feature/lifeos-450-rules-automation
+    paths:
+      - scripts/apply-lifeos-450-release-corrections.mjs
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply guarded LifeOS 4.5 release corrections
+        run: |
+          node scripts/apply-lifeos-450-release-corrections.mjs
+          node --check app.js
+      - name: Commit generated source correction
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo 'No generated correction was required.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app.js scripts/fragments/lifeos-450-tests.jsfrag scripts/fragments/lifeos-450-safety-methods.jsfrag scripts/fragments/lifeos-450-pending-ui.jsfrag
+          git commit -m 'fix(4.5): complete approvals and safe earliest-slot scheduling'
+          git push origin HEAD:feature/lifeos-450-rules-automation
