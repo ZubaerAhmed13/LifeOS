@@ -1,5 +1,5 @@
 const { test, expect } = require('@playwright/test');
-const { resetApp } = require('./helpers');
+const { resetApp, waitForApp } = require('./helpers');
 
 test.describe('LifeOS 4.4.1 final evidence correctness', () => {
   test.beforeEach(async ({ page }) => resetApp(page));
@@ -78,6 +78,19 @@ test.describe('LifeOS 4.4.1 final evidence correctness', () => {
   });
 
   test('expanded deterministic self-test passes all evidence regressions', async ({ page }) => {
+    // The retained Storage and Compute fallback tests are deterministic only when
+    // the corresponding optional browser facilities are absent. Force exactly
+    // that environment without weakening or skipping those tests.
+    await page.addInitScript(() => {
+      try {
+        Object.defineProperty(Navigator.prototype, 'storage', { configurable: true, get: () => undefined });
+      } catch {}
+      try {
+        Object.defineProperty(globalThis, 'Worker', { configurable: true, writable: true, value: undefined });
+      } catch {}
+    });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await waitForApp(page);
     const report = await page.evaluate(async () => {
       const runner = new LifeOS.SelfTestRunner(LifeOS.app.repo);
       const value = await runner.run();
