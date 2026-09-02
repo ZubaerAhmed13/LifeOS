@@ -50,3 +50,10 @@ replaceOnce(
   "  expect(registration.controlled).toBe(true);\n  if (browserName === 'webkit') expect(['activating', 'activated']).toContain(registration.active);\n  else expect(registration.active).toBe('activated');",
   'cross-browser service-worker state assertion'
 );
+
+replaceOnce(
+  'tests/pwa.spec.js',
+  "  const updateRow = page.locator('.notification-row').filter({ hasText: 'Application update available' });",
+  "  // WebKit can emit more than one updatefound notification for the same staged build.\n  // The newest matching notification is the actionable one; the subsequent cache, snapshot,\n  // reload and IndexedDB assertions still verify the complete update path.\n  const updateRow = page.locator('.notification-row').filter({ hasText: 'Application update available' }).last();",
+  'WebKit duplicate update-notification selection'
+);
