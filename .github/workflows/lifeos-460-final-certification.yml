@@ -33,6 +33,7 @@ jobs:
           node --check scripts/apply-lifeos-460-decision-engine.mjs
           node --check scripts/harden-lifeos-460-decision-engine.mjs
           node --check scripts/harden-lifeos-460-apply-safety.mjs
+          node --check scripts/harden-lifeos-460-what-now.mjs
       - name: Generate protected 4.6 production source and commit exact tree if needed
         id: freeze
         shell: bash
@@ -41,6 +42,7 @@ jobs:
           node scripts/apply-lifeos-460-decision-engine.mjs
           node scripts/harden-lifeos-460-decision-engine.mjs
           node scripts/harden-lifeos-460-apply-safety.mjs
+          node scripts/harden-lifeos-460-what-now.mjs
           if ! git diff --quiet -- app.js decision-engine.js app.css index.html service-worker.js manifest.webmanifest; then
             git config user.name 'github-actions[bot]'
             git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
@@ -56,6 +58,7 @@ jobs:
           node scripts/apply-lifeos-460-decision-engine.mjs
           node scripts/harden-lifeos-460-decision-engine.mjs
           node scripts/harden-lifeos-460-apply-safety.mjs
+          node scripts/harden-lifeos-460-what-now.mjs
           git diff --exit-code
       - name: Parse all release-critical JavaScript
         run: |
@@ -65,6 +68,7 @@ jobs:
           node --check planning-worker.js
           node --check scripts/static-qa-460.mjs
           node --check scripts/build-release-460.mjs
+          node --check scripts/harden-lifeos-460-what-now.mjs
           node --check tests/decision-460.spec.js
           node --check tests/decision-performance-460.spec.js
       - name: Verify frozen identity and non-sacrifice invariants
@@ -89,6 +93,8 @@ jobs:
           grep -F "capacityShortfall" decision-engine.js
           grep -F "RULEENGINE-ALIGNMENT" decision-engine.js
           grep -F "PERSONAL-INTELLIGENCE" decision-engine.js
+          grep -F "data-decision-what-now" decision-engine.js
+          grep -F "source:'what-now'" decision-engine.js
           ! grep -E '\beval\s*\(' app.js decision-engine.js planning-worker.js
           ! grep -E '\bnew\s+Function\s*\(' app.js decision-engine.js planning-worker.js
           ! grep -E 'fetch\s*\(|XMLHttpRequest|WebSocket|EventSource' decision-engine.js
@@ -106,15 +112,23 @@ jobs:
         with:
           node-version: '22'
       - name: Run LifeOS 4.6 static QA
-        run: node scripts/static-qa-460.mjs | tee static-qa-460.log
+        shell: bash
+        run: |
+          set -o pipefail
+          node scripts/static-qa-460.mjs | tee static-qa-460.log
       - name: Build synchronized PWA and standalone from exact SHA
         env:
-          GITHUB_SHA: ${{ needs.exact_source.outputs.certified_sha }}
+          LIFEOS_SOURCE_SHA: ${{ needs.exact_source.outputs.certified_sha }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_REF_NAME: ${{ github.ref_name }}
           GITHUB_RUN_ID: ${{ github.run_id }}
           GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
-        run: node scripts/build-release-460.mjs | tee build-parity-460.log
+        shell: bash
+        run: |
+          set -o pipefail
+          node scripts/build-release-460.mjs | tee build-parity-460.log
+          grep -F "SOURCE_COMMIT ${{ needs.exact_source.outputs.certified_sha }}" build-parity-460.log
+          node -e "const p=require('./dist/BUILD_PROVENANCE.json');if(p.finalSha!=='${{ needs.exact_source.outputs.certified_sha }}')process.exit(1)"
       - name: Upload static evidence
         uses: actions/upload-artifact@v4
         with:
@@ -174,12 +188,14 @@ jobs:
           const calendarPath='verify-440/tests/calendar-430.spec.js';let calendar=fs.readFileSync(calendarPath,'utf8');calendar=calendar.replace(/app: '4\.4\.0'/g,"app: '4.6.0'");fs.writeFileSync(calendarPath,calendar);
           const intelligencePath='verify-440/tests/intelligence-440.spec.js';let intelligence=fs.readFileSync(intelligencePath,'utf8');intelligence=intelligence.replace(/app: '4\.4\.0'/g,"app: '4.6.0'");intelligence=intelligence.replace(/intelligence: '4\.4\.1'/g,"intelligence: '4.4.2'");intelligence=intelligence.replace(/model 4\\\.4\\\.1/g,'model 4\\.4\\.2');fs.writeFileSync(intelligencePath,intelligence);
           const pwaPath='verify-440/tests/pwa.spec.js';let pwa=fs.readFileSync(pwaPath,'utf8');pwa=pwa.replaceAll('lifeos-shell-4.4.0-','lifeos-shell-4.6.0-');fs.writeFileSync(pwaPath,pwa);
+          const evidencePath='verify-440/tests/evidence-correctness.spec.js';let evidence=fs.readFileSync(evidencePath,'utf8');evidence=evidence.replace("appVersion: '4.5.1'","appVersion: '4.6.0'");fs.writeFileSync(evidencePath,evidence);
           const rules450='verify-440/tests/rules-450.spec.js';let r450=fs.readFileSync(rules450,'utf8');r450=r450.replace("app: '4.5.1'","app: '4.6.0'");fs.writeFileSync(rules450,r450);
           const rules451='verify-440/tests/rules-451-completion.spec.js';let r451=fs.readFileSync(rules451,'utf8');r451=r451.replace("expect(coverage.version).toBe('4.5.1');","expect(coverage.version).toBe('4.6.0');");fs.writeFileSync(rules451,r451);
           const packagePath='verify-440/package.json';const pkg=JSON.parse(fs.readFileSync(packagePath,'utf8'));pkg.name='lifeos-4-6-decision-engine-certification';pkg.version='4.6.0';fs.writeFileSync(packagePath,JSON.stringify(pkg,null,2)+'\n');
           NODE
           grep -F 'retries: 0' verify-440/playwright.config.cjs
           grep -F 'decision-460.spec.js' verify-440/playwright.config.cjs
+          grep -F "appVersion: '4.6.0'" verify-440/tests/evidence-correctness.spec.js
           test "$(sha256sum app.js | awk '{print $1}')" = "$(sha256sum verify-440/pwa/app.js | awk '{print $1}')"
           test "$(sha256sum decision-engine.js | awk '{print $1}')" = "$(sha256sum verify-440/pwa/decision-engine.js | awk '{print $1}')"
       - name: Install certification dependencies
@@ -249,7 +265,7 @@ jobs:
           path: static-evidence
       - name: Build synchronized release assets
         env:
-          GITHUB_SHA: ${{ needs.exact_source.outputs.certified_sha }}
+          LIFEOS_SOURCE_SHA: ${{ needs.exact_source.outputs.certified_sha }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_REF_NAME: ${{ github.ref_name }}
           GITHUB_RUN_ID: ${{ github.run_id }}
@@ -310,22 +326,23 @@ jobs:
           - DecisionPreviewManager: PASS
           - DecisionApplyCoordinator: PASS
           - DecisionHistory: PASS
+          - Decision-backed What Now: PASS
 
           ### Safety and architecture
           - Existing LifeOS domain engines remain authoritative: PASS
           - Hard feasibility before ranking: PASS
           - Keep Current Plan option: PASS
           - Benefit + opportunity-cost explanation: PASS
-          - Preview production immutability: PASS
+          - Preview production planning-state immutability: PASS
           - Apply stale fingerprint protection: PASS
           - Apply hard-constraint revalidation: PASS
           - Atomic Apply + one Undo path: PASS
           - Cross-tab exclusive operation lock: PASS
-          - Scenario isolation: PASS
+          - Scenario production-state isolation: PASS
           - Offline/local-only Decision Engine: PASS
           - No eval/new Function: PASS
           - No remote Decision Engine endpoint: PASS
-          - Mobile 390×844 and keyboard Decision Center: PASS
+          - Mobile 390×844 and keyboard Decision Center / What Now: PASS
 
           ### Exact-SHA certification
           - Static QA: PASS
@@ -337,7 +354,7 @@ jobs:
           - PWA / Standalone app parity: PASS
           - PWA / Standalone Decision Engine parity: PASS
           - SHA-256 release manifest: PASS
-          - Build provenance: PASS
+          - Build provenance exact-SHA binding: PASS
           EOF
       - name: Upload authenticated release package
         uses: actions/upload-artifact@v4
