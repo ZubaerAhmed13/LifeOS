@@ -22,6 +22,8 @@ add('civil-day lifecycle active',has("evaluateCivilDay('timer')")&&has("visibili
 add('civil-day lifecycle cleanup',has("removeEventListener?.('visibilitychange'"));
 add('configured-zone rule context',has("civil=TimeZoneEngine.parts(Date.now(),settings.timeZoneId"));
 add('bounded operation settlement',has('RULE-OPERATION-WAIT-019'));
+add('rule save waits for lifecycle queue',has("async save(rule){const saved=await this.repo.save('rules',DataValidator.rule(rule));await this.processing;return saved}"));
+add('rule dry-run waits for lifecycle queue',has("async testRule(rule,event,{data=null,settings=null,mode='dry-run'}={}){await this.processing;"));
 add('capacity lifecycle',has('evaluateCapacityChanges(stores,dates,lineage=null)'));
 add('project shortfall lifecycle',has('evaluateProjectShortfalls(stores,dates,lineage=null)'));
 add('planning refresh lifecycle',has('emitPlanningRefresh(stores,dates,lineage=null'));
