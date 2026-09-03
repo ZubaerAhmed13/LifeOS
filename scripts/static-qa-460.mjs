@@ -12,7 +12,7 @@ const files={
 const checks=[];
 const add=(name,pass,details='')=>checks.push({name,pass:Boolean(pass),details});
 const has=(source,needle)=>source.includes(needle);
-const classBody=(source,name,next='class '=>source)=>{
+const classBody=(source,name)=>{
   const start=source.indexOf(`class ${name}`);if(start<0)return'';
   const rest=source.slice(start+6+name.length),nextIndex=rest.search(/\nclass\s+[A-Za-z0-9_]+/);
   return nextIndex<0?source.slice(start):source.slice(start,start+6+name.length+nextIndex);
@@ -41,7 +41,7 @@ add('Project forecast delegated',has(files.decision,'ProjectForecastEngine.proje
 add('ConflictEngine owns hard feasibility',has(files.decision,'ConflictEngine.checkInterval'));
 add('ScheduleRepairEngine delegated',has(files.decision,'ScheduleRepairEngine'));
 add('Personal Intelligence consumed softly',has(files.decision,'PersonalIntelligenceEngine'));
-add('Rules consumed from repository / existing engine',has(files.decision,"repo.all('rules'")&&has(files.decision,'activeRules'));
+add('Rules consumed without remote parsing',has(files.decision,"repo.all('rules'")&&has(files.decision,'activeRules'));
 add('Undo used for accepted decision',has(files.decision,'.undo.execute('));
 add('OperationJournal used',has(files.decision,'.journal?.begin('));
 add('Cross-tab operation lock used',has(files.decision,"withExclusiveLock('Decision apply'"));
@@ -67,7 +67,7 @@ add('No cloud/telemetry endpoint in decision layer',!/(https?:\/\/|telemetry|ana
 
 add('Decision Center UI present',has(files.decision,'DecisionCenterUI')&&has(files.decision,'decisionCenterDialog'));
 add('Accessible live status',has(files.decision,'aria-live="polite"')&&has(files.decision,'aria-labelledby="decisionCenterTitle"'));
-add('Keyboard-native controls',has(files.decision,"dialog.id='decisionCenterDialog'")&&has(files.decision,'button.type=\'button\''));
+add('Keyboard-native controls',has(files.decision,"dialog.id='decisionCenterDialog'")&&has(files.decision,"button.type='button'"));
 add('Mobile 390-class layout covered',has(files.css,'@media (max-width:430px)')&&has(files.css,'.decision-grid{grid-template-columns:1fr}'));
 add('Tablet-safe responsive layout',has(files.css,'@media (max-width:700px)'));
 
