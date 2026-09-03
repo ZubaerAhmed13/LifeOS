@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '4.5.1';
+const APP_VERSION = '4.6.0';
 const CACHE_BUILD = 'pwa1';
 const SHELL_CACHE = `lifeos-shell-${APP_VERSION}-${CACHE_BUILD}`;
 const APP_SHELL = [
@@ -8,6 +8,7 @@ const APP_SHELL = [
   './index.html',
   './app.css',
   './app.js',
+  './decision-engine.js',
   './planning-worker.js',
   './manifest.webmanifest',
   './icons/icon-192.png',

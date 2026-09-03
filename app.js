@@ -1,8 +1,9 @@
 'use strict';
 
-  const APP_VERSION='4.5.1';
+  const APP_VERSION='4.6.0';
   const INTELLIGENCE_MODEL_VERSION='4.4.2';
   const RULE_ENGINE_VERSION='4.5.1';
+  const DECISION_ENGINE_VERSION='4.6.0';
   const RULE_SCHEMA_VERSION=1;
   const MAX_RULE_CHAIN_DEPTH=5;
   const RULE_HISTORY_LIMIT=250;
@@ -10,7 +11,7 @@
   const DB_SCHEMA_VERSION=16;
   const SCHEDULER_VERSION='4.1.0';
   const BACKUP_VERSION=2;
-  const BUILD_NAME='Professional Core · Final Automation Completion';
+  const BUILD_NAME='Professional Core · Decision Engine, Goal Alignment & Adaptive Planning';
   const DB_NAME='LifeOSDB';
 
   const STORE_DEFINITIONS={
@@ -1948,5 +1949,5 @@
   }
 
   const lifeOS=new App();
-  globalThis.LifeOS={app:lifeOS,ruleEngineVersion:RULE_ENGINE_VERSION,RuleEngine,RULE_TRIGGERS,RULE_CONDITIONS,RULE_ACTIONS,RULE_TEMPLATES,RULE_TRIGGER_PRODUCERS,RULE_ACTION_EXECUTORS,RULE_PLANNING_PREFERENCES,version:APP_VERSION,schemaVersion:DB_SCHEMA_VERSION,schedulerVersion:SCHEDULER_VERSION,forecastModelVersion:FORECAST_MODEL_VERSION,calendarEngineVersion:CALENDAR_ENGINE_VERSION,intelligenceModelVersion:INTELLIGENCE_MODEL_VERSION,CoreUtil,TimeZoneEngine,CivilTimeEngine,CrossTabCoordinator,OperationLockManager,StorageHealthManager,ComputeManager,TimeInterval,IntervalSplitter,SleepEngine,EventTimeEngine,ConflictEngine,CapacityEngine,ScheduleStabilityEngine,ScheduleRepairEngine,FreezeManager,RecoveryTimeEngine,ContextSwitchEngine,PersonalPlanningModel,IntelligenceStatistics,IntelligenceConfidenceEngine,IntelligenceDatasetBuilder,PersonalBaselineEngine,PersonalIntelligenceEngine,DayScheduler,WeekScheduler,DeadlineEngine,ProjectForecastEngine,ForecastConfidenceEngine,SensitivityEngine,AssumptionInspector,MonteCarloEngine,ScenarioModificationValidator,ScenarioDataView,ScenarioDiffEngine,ScenarioApplyPlanner,ScenarioEngine,CalendarSnapEngine,CalendarOverlapEngine,CalendarInteractionPolicy,CalendarInteractionEngine,RecurrenceEngine,IntegrityEngine,SelfTestRunner};
+  globalThis.LifeOS={app:lifeOS,decisionEngineVersion:DECISION_ENGINE_VERSION,ruleEngineVersion:RULE_ENGINE_VERSION,RuleEngine,RULE_TRIGGERS,RULE_CONDITIONS,RULE_ACTIONS,RULE_TEMPLATES,RULE_TRIGGER_PRODUCERS,RULE_ACTION_EXECUTORS,RULE_PLANNING_PREFERENCES,version:APP_VERSION,schemaVersion:DB_SCHEMA_VERSION,schedulerVersion:SCHEDULER_VERSION,forecastModelVersion:FORECAST_MODEL_VERSION,calendarEngineVersion:CALENDAR_ENGINE_VERSION,intelligenceModelVersion:INTELLIGENCE_MODEL_VERSION,CoreUtil,TimeZoneEngine,CivilTimeEngine,CrossTabCoordinator,OperationLockManager,StorageHealthManager,ComputeManager,TimeInterval,IntervalSplitter,SleepEngine,EventTimeEngine,ConflictEngine,CapacityEngine,ScheduleStabilityEngine,ScheduleRepairEngine,FreezeManager,RecoveryTimeEngine,ContextSwitchEngine,PersonalPlanningModel,IntelligenceStatistics,IntelligenceConfidenceEngine,IntelligenceDatasetBuilder,PersonalBaselineEngine,PersonalIntelligenceEngine,DayScheduler,WeekScheduler,DeadlineEngine,ProjectForecastEngine,ForecastConfidenceEngine,SensitivityEngine,AssumptionInspector,MonteCarloEngine,ScenarioModificationValidator,ScenarioDataView,ScenarioDiffEngine,ScenarioApplyPlanner,ScenarioEngine,CalendarSnapEngine,CalendarOverlapEngine,CalendarInteractionPolicy,CalendarInteractionEngine,RecurrenceEngine,IntegrityEngine,SelfTestRunner};
   document.readyState==='loading'?document.addEventListener('DOMContentLoaded',()=>lifeOS.init()):lifeOS.init();

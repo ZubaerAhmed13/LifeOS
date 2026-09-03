@@ -103,7 +103,7 @@ class DecisionContextBuilder{
     const readyTasks=tasks.filter(t=>readyTask(t,tasks));
     const blockedTasks=tasks.filter(activeTask).filter(t=>!readyTask(t,tasks));
     const context={
-      generatedAt:nowISO(),decisionDate:date,currentLocalTime:civil.time||'',timeZoneId:zone,mode,
+      generatedAt:nowISO(),decisionDate:date,currentDate:civil.date||date,currentLocalTime:civil.time||'',timeZoneId:zone,mode,
       data:clone(data),settings:clone(settings),tasks:clone(tasks),readyTasks:clone(readyTasks),blockedTasks:clone(blockedTasks),
       projects:clone(projects),events:clone(events),timeBlocks:clone(timeBlocks),capacity:clone(capacity),
       deadlineForecasts:clone(deadlineForecasts),projectForecasts:clone(projectForecasts),activeRules:clone(rules),
@@ -138,7 +138,7 @@ class DecisionCandidateGenerator{
       if(pr)return pr;
       return String(a.id).localeCompare(String(b.id));
     }).slice(0,MAX_TASK_CANDIDATES);
-    const currentMinute=CoreUtil.clock(context.currentLocalTime)||CoreUtil.clock(context.settings.dayStart)||0;
+    const currentMinute=context.decisionDate>context.currentDate?(CoreUtil.clock(context.settings.dayStart)||0):(CoreUtil.clock(context.currentLocalTime)||CoreUtil.clock(context.settings.dayStart)||0);
     const slotStart=Math.ceil(currentMinute/15)*15;
     const remaining=Math.max(0,num(context.capacity?.focusRemaining,context.capacity?.physicalLeft||0));
     if([DECISION_TYPES.NEXT_ACTION,DECISION_TYPES.TODAY_PLAN,DECISION_TYPES.DEADLINE_TRIAGE,DECISION_TYPES.CAPACITY_SHORTFALL,DECISION_TYPES.PROJECT_ALLOCATION].includes(type)){
@@ -212,6 +212,13 @@ class DecisionTradeoffEngine{
     const contextCost=currentContext&&task?.context&&currentContext!==task.context?1:0;
     const disruption=.15;
     const recoveryImpact=0;
+    const taskType=String(task?.taskType||task?.type||task?.context||'');
+    const deepCutoff=CoreUtil.clock(context.settings.deepWorkBefore||''),typeCutoff=CoreUtil.clock(context.settings.taskTypePreferredBefore?.[taskType]||'');
+    let ruleAlignment=0;
+    if(task?.workMode==='Deep'&&deepCutoff!==null)ruleAlignment=candidate.startMinute<deepCutoff?.35:-.15;
+    if(typeCutoff!==null)ruleAlignment+=candidate.startMinute<typeCutoff?.25:-.1;
+    let intelligenceAlignment=0,intelligenceReason='';
+    try{const signal=api.PersonalIntelligenceEngine?.signalForTask?.(task,context.intelligence||{insights:[]},context.settings,candidate.startMinute);if(signal){intelligenceAlignment=Math.min(.25,num(signal.boost,0)/24);intelligenceReason=signal.explanation||''}}catch{}
     const deferralCost=deadlineProtection*.8+forecastImpact*.2;
     const reasons=[
       reason('DEADLINE-PROTECTION','DeadlineEngine','daysToDeadline',days,deadline||'No deadline',deadlineProtection>.8?'important':'info'),
@@ -219,8 +226,10 @@ class DecisionTradeoffEngine{
       reason('CAPACITY-FIT','CapacityEngine','focusRemaining',cap,`${candidate.duration}m proposed`),
       reason('BUFFER-PRESERVATION','CapacityEngine','bufferAfter',bufferAfter,`desired ${Math.round(desiredBuffer)}m`)
     ];
+    if(ruleAlignment)reasons.push(reason('RULEENGINE-ALIGNMENT','RuleEngine','planningPreference',ruleAlignment,'Applied planning-policy outputs are soft unless enforced by authoritative feasibility.'));
+    if(intelligenceAlignment&&intelligenceReason)reasons.push(reason('PERSONAL-INTELLIGENCE','PersonalIntelligenceEngine','acceptedPreference',intelligenceAlignment,intelligenceReason));
     if(forecast)reasons.push(reason('FORECAST-RISK','DeadlineEngine','risk',forecast.risk||'',`shortfall ${num(forecast.shortfall)}m`));
-    return{deadlineProtection,projectAlignment,forecastImpact,capacityFit,disruption,recoveryImpact,contextCost,bufferImpact,deferralCost,reasons};
+    return{deadlineProtection,projectAlignment,forecastImpact,capacityFit,disruption,recoveryImpact,contextCost,bufferImpact,ruleAlignment,intelligenceAlignment,deferralCost,reasons};
   }
 }
 
@@ -231,11 +240,13 @@ class DecisionRankingEngine{
       const stages=[
         B.deadlineProtection-A.deadlineProtection,
         B.projectAlignment-A.projectAlignment,
+        num(B.ruleAlignment)-num(A.ruleAlignment),
         B.forecastImpact-A.forecastImpact,
         B.capacityFit-A.capacityFit,
         A.disruption-B.disruption,
         A.recoveryImpact-B.recoveryImpact,
         A.contextCost-B.contextCost,
+        num(B.intelligenceAlignment)-num(A.intelligenceAlignment),
         B.bufferImpact-A.bufferImpact
       ];
       for(const delta of stages)if(Math.abs(delta)>.0001)return delta;
@@ -243,7 +254,10 @@ class DecisionRankingEngine{
       if(b.candidate.kind===KEEP_CURRENT_PLAN&&a.candidate.kind!==KEEP_CURRENT_PLAN)return-1;
       return String(a.candidate.id).localeCompare(String(b.candidate.id));
     });
-    return ranked.map((row,index)=>({...row,rank:index+1}));
+    const keep=ranked.find(row=>row.candidate.kind===KEEP_CURRENT_PLAN),bestChange=ranked.find(row=>row.candidate.kind!==KEEP_CURRENT_PLAN);
+    const material=bestChange&&(bestChange.tradeoffs.deadlineProtection>=.35||bestChange.tradeoffs.projectAlignment>=.55||bestChange.tradeoffs.forecastImpact>=.55||bestChange.tradeoffs.deferralCost>=.55);
+    const ordered=keep&&!material?[keep,...ranked.filter(row=>row!==keep)]:ranked;
+    return ordered.map((row,index)=>({...row,rank:index+1}));
   }
 }
 
@@ -324,15 +338,16 @@ class DecisionApplyCoordinator{
       error.code='DECISION-STALE-460';throw error;
     }
     if(choice.candidate.kind===KEEP_CURRENT_PLAN)return this.record(decision,choice,'Applied',{operationId:'',noChange:true});
+    if(choice.candidate.kind!=='plan-repair'){
+      const feasibility=new DecisionFeasibilityGate().evaluate(choice.candidate,fresh.context);
+      if(!feasibility.feasible){const error=new Error('This recommendation is no longer feasible under the current hard constraints.');error.code='DECISION-REVALIDATION-460';error.details={blockers:feasibility.blockers,evidence:feasibility.evidence};throw error}
+    }
     if(choice.candidate.kind==='plan-repair'){
-      const api=host(),{ScheduleRepairEngine,CoreUtil}=api;
       const op=async()=>{
-        const engine=new ScheduleRepairEngine(fresh.context.data,fresh.context.settings,api.PersonalPlanningModel.build(fresh.context.data),{nowMinute:CoreUtil.dayIndex(fresh.context.decisionDate)*1440+(CoreUtil.clock(fresh.context.currentLocalTime)||0)});
-        const preview=engine.generate(fresh.context.decisionDate,{maxRadius:4}),candidate=preview.candidates?.[0];
+        const preview=await this.app.service.buildRepair(fresh.context.decisionDate,{maxRadius:4}),candidate=preview.candidates?.[0];
         if(!candidate)return this.record(decision,choice,'Applied',{operationId:'',noChange:true});
-        const changes=array(candidate.changes).map(c=>({store:'timeBlocks',id:c.id,before:c.before,after:c.after}));
-        const result=changes.length?await this.app.undo.execute('Decision — minimal repair',changes,{activityType:'decision-apply',meta:{decisionId:decision.decisionId,decisionEngineVersion:DECISION_ENGINE_VERSION}}):null;
-        return this.record(decision,choice,'Applied',{operationId:result?.id||candidate.id||''});
+        const result=await this.app.service.applyRepair(preview,candidate.id,{skipOperationLock:true,label:'Decision — minimal repair'});
+        return this.record(decision,choice,'Applied',{operationId:result?.operationId||candidate.id||''});
       };
       return this.app.operationLocks?this.app.operationLocks.withExclusiveLock('Decision apply',op):op();
     }
@@ -340,9 +355,9 @@ class DecisionApplyCoordinator{
     if(!task)throw new Error('Task no longer exists.');
     const {CoreUtil}=host(),start=choice.candidate.startMinute;
     const block={
-      id:CoreUtil.uid(),date:choice.candidate.date,startTime:CoreUtil.time(start),duration:choice.candidate.duration,
-      taskId:task.id,projectId:task.projectId||'',title:task.title||choice.candidate.title,
-      sourceType:'decision',decisionId:decision.decisionId,locked:false,createdAt:nowISO(),updatedAt:nowISO(),revision:1
+      id:CoreUtil.uid(),date:choice.candidate.date,startTime:CoreUtil.time(start),endTime:CoreUtil.time(start+choice.candidate.duration),duration:choice.candidate.duration,type:'task',
+      taskId:task.id,projectId:task.projectId||'',lifeAreaId:task.lifeAreaId||'',title:task.title||choice.candidate.title,
+      sourceType:'decision',sourceId:task.id,decisionId:decision.decisionId,manuallyPlaced:true,locked:false,createdAt:nowISO(),updatedAt:nowISO(),revision:1
     };
     const change={store:'timeBlocks',id:block.id,before:null,after:block};
     const op=async()=>{
@@ -397,7 +412,11 @@ class DecisionEngine{
     const alternatives=rawAlternatives.map((row,index)=>({...row,explanation:this.explanations.explain(row,rawAlternatives[index+1]||rawAlternatives[0],context)}));
     const recommended=alternatives[0]||null,elapsed=(performance.now?.()||Date.now())-started;
     const confidence=this.confidence(context,alternatives);
-    const decision={decisionId:`decision:${decisionHash({request,contextFingerprint:context.contextFingerprint,generation})}`,request,contextFingerprint:context.contextFingerprint,dataGeneration:context.dataGeneration,engineVersion:DECISION_ENGINE_VERSION,generatedAt:nowISO(),durationMs:Number(elapsed.toFixed?.(2)||elapsed),dataQuality:context.dataQuality,recommended,alternatives,rejected:evaluated.filter(r=>!r.feasibility.feasible).map(r=>({candidate:r.candidate,blockers:r.feasibility.blockers,evidence:r.feasibility.evidence})),confidence};
+    const availableMinutes=Math.max(0,num(context.capacity?.focusRemaining,context.capacity?.physicalLeft||0));
+    const requiredMinutes=context.readyTasks.reduce((sum,task)=>sum+Math.max(0,num(task.remainingDuration,num(task.estimatedDuration,0))),0);
+    const minimumDeadlineMinutes=context.readyTasks.filter(task=>task.deadline&&deadlineDays(task,context.decisionDate,host().CoreUtil)<=1).reduce((sum,task)=>sum+Math.max(0,num(task.remainingDuration,num(task.estimatedDuration,0))),0);
+    const capacityShortfall={availableMinutes,requiredMinutes,minimumDeadlineMinutes,shortfallMinutes:Math.max(0,requiredMinutes-availableMinutes),deadlineShortfallMinutes:Math.max(0,minimumDeadlineMinutes-availableMinutes)};
+    const decision={decisionId:`decision:${decisionHash({request,contextFingerprint:context.contextFingerprint,generation})}`,request,contextFingerprint:context.contextFingerprint,dataGeneration:context.dataGeneration,engineVersion:DECISION_ENGINE_VERSION,generatedAt:nowISO(),durationMs:Number(elapsed.toFixed?.(2)||elapsed),dataQuality:context.dataQuality,capacityShortfall,recommended,alternatives,rejected:evaluated.filter(r=>!r.feasibility.feasible).map(r=>({candidate:r.candidate,blockers:r.feasibility.blockers,evidence:r.feasibility.evidence})),confidence};
     return decision;
   }
   confidence(context,alternatives){
@@ -439,7 +458,8 @@ class DecisionCenterUI{
     const body=this.panel.querySelector('[data-decision-body]'),decision=this.current;if(!decision){body.innerHTML='';return}
     if(!decision.recommended){body.innerHTML='<div class="note warning">No feasible alternative is available. Review blocked tasks and hard constraints.</div>';return}
     const card=(alt,index)=>`<article class="decision-card ${index===0?'recommended':''}" data-alt="${escapeHtml(alt.candidate.id)}"><div class="decision-card-kicker">${escapeHtml(alt.label)}</div><h3>${escapeHtml(alt.candidate.title)}</h3>${alt.candidate.duration?`<div class="decision-duration">${alt.candidate.duration} min</div>`:''}<p>${escapeHtml(alt.explanation.summary)}</p><div class="decision-grid"><div><b>Protects</b><ul>${alt.explanation.protects.map(x=>`<li>${escapeHtml(x)}</li>`).join('')}</ul></div><div><b>Opportunity cost</b><p>${escapeHtml(alt.explanation.opportunityCost)}</p></div></div><details><summary>Why and trade-offs</summary><ul>${alt.tradeoffs.reasons.map(r=>`<li>${escapeHtml(r.reasonCode)} · ${escapeHtml(r.sourceEngine)}: ${escapeHtml(r.metric)} ${escapeHtml(r.value)}</li>`).join('')}</ul>${alt.explanation.whyLower?`<p>${escapeHtml(alt.explanation.whyLower)}</p>`:''}</details><div class="decision-actions"><button class="btn" data-preview="${escapeHtml(alt.candidate.id)}">Preview</button><button class="btn primary" data-apply="${escapeHtml(alt.candidate.id)}">Apply</button></div></article>`;
-    body.innerHTML=`<section class="decision-summary"><div><b>Recommended decision</b><span class="decision-confidence">Confidence: ${escapeHtml(decision.confidence.label)}</span></div><small>Exact context ${escapeHtml(decision.contextFingerprint)} · ${escapeHtml(String(decision.durationMs))} ms</small></section>${decision.dataQuality.missingInputs.length?`<div class="note">${decision.dataQuality.missingInputs.map(escapeHtml).join(' ')}</div>`:''}<div class="decision-card-list">${decision.alternatives.map(card).join('')}</div><div data-preview-output></div>`;
+    const shortfall=decision.capacityShortfall?.shortfallMinutes||0,shortfallNote=shortfall?`<div class="warning"><b>Capacity shortfall:</b> ${shortfall} minutes cannot fit in the remaining focus capacity today.</div>`:'';
+    body.innerHTML=`<section class="decision-summary"><div><b>Recommended decision</b><span class="decision-confidence">Confidence: ${escapeHtml(decision.confidence.label)}</span></div><small>Exact context ${escapeHtml(decision.contextFingerprint)} · ${escapeHtml(String(decision.durationMs))} ms</small></section>${shortfallNote}${decision.dataQuality.missingInputs.length?`<div class="note">${decision.dataQuality.missingInputs.map(escapeHtml).join(' ')}</div>`:''}<div class="decision-card-list">${decision.alternatives.map(card).join('')}</div><div data-preview-output></div>`;
   }
   async handle(event){
     const previewId=event.target?.dataset?.preview,applyId=event.target?.dataset?.apply;

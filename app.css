@@ -49,3 +49,22 @@
 
 /* LifeOS 4.5 Rules & Automation */
 .rule-toolbar{display:grid;gap:12px}.rule-filter-row{display:grid;gap:12px}.rule-card{scroll-margin-top:80px}.rule-card:focus{outline:2px solid currentColor;outline-offset:3px}.rule-summary{display:grid;grid-template-columns:minmax(90px,.35fr) 1fr;gap:8px 12px}.rule-summary div{display:contents}.rule-summary dt{font-weight:700}.rule-summary dd{margin:0}.rule-builder{display:grid;gap:16px}.rule-builder fieldset{border:1px solid var(--border);border-radius:12px;padding:14px;display:grid;gap:12px}.rule-builder legend{font-weight:800;padding:0 6px}.rule-builder-row{display:grid;grid-template-columns:minmax(150px,1fr) minmax(150px,1fr) minmax(160px,1fr) auto;gap:10px;align-items:end}.rule-builder-row label{display:grid;gap:6px}.rule-test-inline{margin-top:10px}.rule-select{display:inline-flex;align-items:center}.rule-bulk{padding-top:10px;border-top:1px solid var(--border)}@media(max-width:720px){.rule-builder-row{grid-template-columns:1fr}.rule-summary{grid-template-columns:1fr}.rule-summary div{display:block}.rule-filter-row .segmented{overflow-x:auto;justify-content:flex-start}.rule-card .actions{display:grid;grid-template-columns:1fr 1fr}.rule-card .actions .danger{grid-column:1/-1}}
+
+
+/* LifeOS 4.6 Decision Center */
+.decision-center-launch{white-space:nowrap}
+.decision-center-dialog{width:min(980px,calc(100vw - 28px));max-height:min(92vh,920px);padding:0;border:1px solid var(--line,#d8dee9);border-radius:18px;background:var(--panel,#fff);color:var(--text,#172033)}
+.decision-center-dialog::backdrop{background:rgba(15,23,42,.52);backdrop-filter:blur(3px)}
+.decision-center-shell{display:grid;gap:16px;padding:20px}
+.decision-center-head,.decision-center-controls,.decision-summary>div,.decision-actions{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.decision-center-head h2{margin:2px 0 0}.decision-center-head small,.decision-card-kicker{font-size:.78rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--muted,#667085)}
+.decision-center-controls{flex-wrap:wrap;padding:12px;border:1px solid var(--line,#d8dee9);border-radius:14px;background:var(--surface-2,#f8fafc)}
+.decision-center-controls label{display:flex;align-items:center;gap:8px;font-weight:700}.decision-center-controls select{min-width:220px}
+.decision-summary{display:grid;gap:4px;padding:12px 14px;border-radius:14px;background:var(--surface-2,#f8fafc);border:1px solid var(--line,#d8dee9)}
+.decision-confidence{font-size:.82rem;color:var(--muted,#667085)}
+.decision-card-list{display:grid;gap:12px}.decision-card{position:relative;padding:16px;border:1px solid var(--line,#d8dee9);border-radius:16px;background:var(--panel,#fff);box-shadow:0 4px 18px rgba(15,23,42,.05)}
+.decision-card.recommended{border-width:2px}.decision-card h3{margin:5px 0}.decision-duration{display:inline-flex;padding:4px 8px;border-radius:999px;background:var(--surface-2,#eef2f7);font-weight:800;font-size:.82rem}
+.decision-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:12px 0}.decision-grid p,.decision-grid ul{margin:6px 0 0}.decision-card details{margin-top:10px}.decision-card summary{cursor:pointer;font-weight:750}
+.decision-actions{justify-content:flex-end;margin-top:12px}.decision-preview{margin-top:14px;padding:14px;border:1px dashed var(--line,#cbd5e1);border-radius:14px;background:var(--surface-2,#f8fafc)}
+@media (max-width:700px){.decision-center-launch{font-size:.8rem;padding-inline:9px}.decision-center-dialog{width:calc(100vw - 16px);max-height:94vh}.decision-center-shell{padding:14px}.decision-center-head,.decision-summary>div{align-items:flex-start}.decision-center-controls{align-items:stretch}.decision-center-controls label{display:grid;width:100%}.decision-center-controls select{width:100%;min-width:0}.decision-grid{grid-template-columns:1fr}.decision-actions{display:grid;grid-template-columns:1fr 1fr}.decision-actions .btn{width:100%}}
+@media (max-width:430px){.decision-center-launch{max-width:104px;overflow:hidden;text-overflow:ellipsis}.decision-center-dialog{margin:auto 8px}.decision-center-shell{padding:12px}.decision-card{padding:13px}}
