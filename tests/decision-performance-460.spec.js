@@ -23,10 +23,10 @@ test.describe('LifeOS 4.6 Decision Performance', () => {
           readyTasks: tasks, tasks, projects: [], projectForecasts: [], deadlineForecasts: [], timeBlocks: [],
           capacity: { focusRemaining: 480, physicalLeft: 600 }, data: { tasks, events: [], projects: [], timeBlocks: [], dayProfiles: [] }, dataQuality: { completeness: 1, missingInputs: [], unavailableSignals: [], warnings: [] }, intelligence: null
         };
-        const generator = new LifeOS.DecisionCandidateGenerator(), gate = new LifeOS.DecisionFeasibilityGate(), tradeoff = new LifeOS.DecisionTradeoffEngine(), ranking = new LifeOS.DecisionRankingEngine();
+        const generator = new LifeOS.DecisionCandidateGenerator(), tradeoff = new LifeOS.DecisionTradeoffEngine(), ranking = new LifeOS.DecisionRankingEngine();
         const started = performance.now();
         const candidates = generator.generate({ type: LifeOS.DECISION_TYPES.NEXT_ACTION }, context);
-        const evaluated = candidates.map(candidate => { const feasibility = candidate.kind === 'keep-current-plan' ? { feasible: true, blockers: [], warnings: [], evidence: [] } : { feasible: true, blockers: [], warnings: [], evidence: [] }; return { candidate, feasibility, tradeoffs: tradeoff.evaluate(candidate, context, feasibility) }; });
+        const evaluated = candidates.map(candidate => { const feasibility = { feasible: true, blockers: [], warnings: [], evidence: [] }; return { candidate, feasibility, tradeoffs: tradeoff.evaluate(candidate, context, feasibility) }; });
         const ranked = ranking.rank(evaluated);
         const durationMs = performance.now() - started;
         return { count, generated: candidates.length, ranked: ranked.length, durationMs };
@@ -34,7 +34,7 @@ test.describe('LifeOS 4.6 Decision Performance', () => {
       console.log(`LIFEOS_DECISION_PERF count=${result.count} generated=${result.generated} ranked=${result.ranked} duration_ms=${result.durationMs.toFixed(3)}`);
       expect(result.generated).toBeLessThanOrEqual(31);
       expect(result.ranked).toBeGreaterThan(0);
-      expect(result.durationMs).toBeLessThan(1000);
+      expect(result.durationMs).toBeLessThan(100);
     });
   }
 });
