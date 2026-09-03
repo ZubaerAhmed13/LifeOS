@@ -29,7 +29,6 @@ async function installRule(page, overrides = {}) {
 
 async function createRepairFixture(page, { sameDay = false } = {}) {
   return page.evaluate(async sameDay => {
-    const settings = await LifeOS.app.repo.settings();
     let date = LifeOS.CoreUtil.addDays(LifeOS.CoreUtil.localDate(), 1);
     let startTime = '10:00';
     let duration = 60;
@@ -100,28 +99,52 @@ async function createRepairFixture(page, { sameDay = false } = {}) {
       taskId: task.id,
       blockId: block.id,
       eventId: event.id,
-      candidateId: candidate.id,
       original: { date: block.date, startTime: block.startTime, endTime: block.endTime },
-      expected: { date: change.after.date, startTime: change.after.startTime, endTime: change.after.endTime },
-      settingsDayEnd: settings.dayEnd
+      expected: { date: change.after.date, startTime: change.after.startTime, endTime: change.after.endTime }
     };
   }, sameDay);
 }
 
-async function waitForRepairCompletion(page, { blockId, ruleId, expected }) {
-  await page.waitForFunction(async ({ blockId, ruleId, expected }) => {
+async function repairState(page, { blockId, ruleId, expected, clickStartedAt }) {
+  return page.evaluate(async ({ blockId, ruleId, expected, clickStartedAt }) => {
     await LifeOS.app.ruleEngine.processing;
     const block = await LifeOS.app.repo.get('timeBlocks', blockId);
-    if (!block || block.date !== expected.date || block.startTime !== expected.startTime || block.endTime !== expected.endTime) return false;
     const logs = await LifeOS.app.repo.all('activityLog', { fresh: true });
     const repair = [...logs].reverse().find(row => row.type === 'repair-apply' && row.meta?.operationId);
-    if (!repair) return false;
     const history = await LifeOS.app.ruleEngine.history();
     const observed = history.find(row => row.meta?.ruleExecution?.ruleId === ruleId && row.meta?.ruleExecution?.triggerType === 'schedule-repaired');
-    if (observed?.meta?.ruleExecution?.status !== 'Applied') return false;
     const runtime = await LifeOS.app.ruleEngine.runtime();
-    return (runtime.recentEventIds || []).includes(`schedule-repaired:${repair.meta.operationId}`);
-  }, { blockId, ruleId, expected }, { timeout: 15000 });
+    const notifications = await LifeOS.app.repo.all('notifications', { fresh: true });
+    const actionErrors = notifications.filter(row => ['ERROR', 'CRITICAL'].includes(row.type) && String(row.createdAt || '') >= clickStartedAt)
+      .map(row => ({ type: row.type, title: row.title, message: row.message || '', errorCode: row.errorCode || '' }));
+    const diagnostics = (await LifeOS.app.repo.all('diagnosticLog', { fresh: true }))
+      .filter(row => row.component === 'Action:apply-repair' && String(row.timestamp || '') >= clickStartedAt)
+      .map(row => ({ severity: row.severity, code: row.code, message: row.message }));
+    const moved = Boolean(block && block.date === expected.date && block.startTime === expected.startTime && block.endTime === expected.endTime);
+    const eventRemembered = Boolean(repair && (runtime.recentEventIds || []).includes(`schedule-repaired:${repair.meta.operationId}`));
+    return {
+      complete: moved && Boolean(repair) && observed?.meta?.ruleExecution?.status === 'Applied' && eventRemembered,
+      block: block ? { date: block.date, startTime: block.startTime, endTime: block.endTime } : null,
+      operationId: repair?.meta?.operationId || '',
+      observedStatus: observed?.meta?.ruleExecution?.status || '',
+      eventRemembered,
+      actionErrors,
+      diagnostics,
+      pendingType: LifeOS.app.state.get('pending')?.type || '',
+      dialogOpen: Boolean(document.getElementById('appDialog')?.open)
+    };
+  }, { blockId, ruleId, expected, clickStartedAt });
+}
+
+async function waitForRepairCompletion(page, input) {
+  let last = null;
+  for (let attempt = 0; attempt < 75; attempt++) {
+    last = await repairState(page, input);
+    if (last.complete) return last;
+    if (last.actionErrors.length || last.diagnostics.length) throw new Error(`Repair My Day product error: ${JSON.stringify(last)}`);
+    await page.waitForTimeout(200);
+  }
+  throw new Error(`Repair My Day did not complete after Apply: ${JSON.stringify(last)}`);
 }
 
 test.describe('LifeOS 4.5.1 supplemental repair/conflict certification v2', () => {
@@ -137,10 +160,16 @@ test.describe('LifeOS 4.5.1 supplemental repair/conflict certification v2', () =
     });
     const fixture = await createRepairFixture(page, { sameDay: true });
 
-    const uiPreview = await page.evaluate(async blockId => {
-      await LifeOS.app.previewRepair();
+    await page.locator('[data-view="today"]').first().click();
+    await expect(page.getByRole('heading', { name: 'Today', exact: true })).toBeVisible();
+    const repairMyDay = page.locator('button[data-action="rescue-day"]');
+    await expect(repairMyDay).toBeVisible();
+    await repairMyDay.click();
+    await expect(page.getByRole('heading', { name: 'Repair My Day' })).toBeVisible();
+
+    const uiPreview = await page.evaluate(blockId => {
       const pending = LifeOS.app.state.get('pending');
-      if (pending?.type !== 'repair') throw new Error('Repair My Day did not establish its real pending repair state.');
+      if (pending?.type !== 'repair') throw new Error('Real Repair My Day UI did not establish pending repair state.');
       const candidate = pending.preview.candidates.find(row => row.id === pending.candidateId);
       const change = candidate?.changes?.find(row => row.id === blockId);
       if (!candidate || !change) throw new Error('Repair My Day UI candidate does not contain the conflicted block.');
@@ -151,23 +180,21 @@ test.describe('LifeOS 4.5.1 supplemental repair/conflict certification v2', () =
         sourceFingerprint: pending.preview.sourceFingerprint
       };
     }, fixture.blockId);
-
     expect(uiPreview.moved).toBeGreaterThan(0);
     expect(uiPreview.expected).not.toEqual(fixture.original);
-    await expect(page.getByRole('heading', { name: 'Repair My Day' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Apply repair' })).toBeVisible();
 
-    const pendingBeforeApply = await page.evaluate(() => {
-      const pending = LifeOS.app.state.get('pending');
-      return { type: pending?.type || '', candidateId: pending?.candidateId || '', sourceFingerprint: pending?.preview?.sourceFingerprint || '' };
+    const apply = page.locator('button[data-action="apply-repair"]');
+    await expect(apply).toBeVisible();
+    const clickStartedAt = await page.evaluate(() => new Date().toISOString());
+    await apply.click();
+    const completed = await waitForRepairCompletion(page, {
+      blockId: fixture.blockId,
+      ruleId: rule.id,
+      expected: uiPreview.expected,
+      clickStartedAt
     });
-    expect(pendingBeforeApply).toEqual({ type: 'repair', candidateId: uiPreview.candidateId, sourceFingerprint: uiPreview.sourceFingerprint });
-
-    await page.getByRole('button', { name: 'Apply repair' }).click();
-    await waitForRepairCompletion(page, { blockId: fixture.blockId, ruleId: rule.id, expected: uiPreview.expected });
 
     const result = await page.evaluate(async ({ blockId, ruleId }) => {
-      await LifeOS.app.ruleEngine.processing;
       const block = await LifeOS.app.repo.get('timeBlocks', blockId);
       const logs = await LifeOS.app.repo.all('activityLog', { fresh: true });
       const repair = [...logs].reverse().find(row => row.type === 'repair-apply' && row.meta?.operationId);
@@ -184,12 +211,11 @@ test.describe('LifeOS 4.5.1 supplemental repair/conflict certification v2', () =
         observedStatus: observed?.meta?.ruleExecution?.status || '',
         recentEventIds: runtime.recentEventIds || [],
         undoAfter: undoChange?.after ? { date: undoChange.after.date, startTime: undoChange.after.startTime, endTime: undoChange.after.endTime } : null,
-        repairCandidateLabel: repair?.meta?.candidate || '',
         observerNotificationPresent: Boolean(notification)
       };
     }, { blockId: fixture.blockId, ruleId: rule.id });
 
-    console.log('LIFEOS_REPAIR_MY_DAY_E2E', JSON.stringify({ fixture, uiPreview, result }));
+    console.log('LIFEOS_REPAIR_MY_DAY_E2E', JSON.stringify({ fixture, uiPreview, completed, result }));
     expect(result.undoAfter).toEqual(uiPreview.expected);
     expect(result.block).toEqual(uiPreview.expected);
     expect(result.operationId).not.toBe('');
