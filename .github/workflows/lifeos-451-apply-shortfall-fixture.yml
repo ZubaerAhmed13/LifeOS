@@ -1,0 +1,42 @@
+name: LifeOS 4.5.1 Apply Shortfall Fixture
+
+on:
+  push:
+    branches:
+      - fix/lifeos-451-final-automation-completion
+
+permissions:
+  contents: write
+
+concurrency:
+  group: lifeos-451-shortfall-fixture-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply replayable correction chain
+        run: |
+          node scripts/repair-lifeos-451-patcher.mjs
+          node scripts/apply-lifeos-451-final-automation.mjs
+          node scripts/apply-lifeos-451-final-corrections.mjs
+          node --check tests/rules-451-completion.spec.js
+          grep -F "title:'R451 shortfall demand'" tests/rules-451-completion.spec.js
+      - name: Commit generated fixture
+        run: |
+          if git diff --quiet; then
+            echo 'No generated changes required.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add tests/rules-451-completion.spec.js
+          git commit -m 'test(4.5.1): add real project shortfall demand'
+          git push origin HEAD:fix/lifeos-451-final-automation-completion
