@@ -144,6 +144,8 @@ test.describe('LifeOS 4.5.1 Final Automation Completion', () => {
           targetDate: '', preferredDayTypes: [], avoidDayTypes: []
         });
         await engine.processing;
+        await LifeOS.app.repo.save('tasks',{id:'r451-shortfall-demand-'+crypto.randomUUID(),title:'R451 shortfall demand',status:'Next',priority:'High',estimatedDuration:600,minimumSessionDuration:30,maximumSessionDuration:120,actualMinutes:0,plannedMinutes:0,blockedBy:[],projectId:project.id});
+        await engine.processing;
         return {projectId:project.id,emittedShortfalls};
       }finally{engine.emitDomainEvent=original;}
     });
