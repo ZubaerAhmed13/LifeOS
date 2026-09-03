@@ -14,7 +14,6 @@ concurrency:
 
 jobs:
   apply:
-    if: ${{ !startsWith(github.event.head_commit.message, 'chore(4.5.1): apply generated completion') }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
