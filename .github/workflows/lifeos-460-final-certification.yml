@@ -1,0 +1,378 @@
+name: LifeOS 4.6 Decision Engine Final Certification
+
+on:
+  push:
+    branches:
+      - feature/lifeos-460-decision-engine
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: lifeos-460-final-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  exact_source:
+    name: Generate and freeze exact 4.6 source
+    runs-on: ubuntu-24.04
+    outputs:
+      certified_sha: ${{ steps.freeze.outputs.certified_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Parse guarded generators
+        run: |
+          node --check scripts/apply-lifeos-460-decision-engine.mjs
+          node --check scripts/harden-lifeos-460-decision-engine.mjs
+          node --check scripts/harden-lifeos-460-apply-safety.mjs
+      - name: Generate protected 4.6 production source and commit exact tree if needed
+        id: freeze
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/apply-lifeos-460-decision-engine.mjs
+          node scripts/harden-lifeos-460-decision-engine.mjs
+          node scripts/harden-lifeos-460-apply-safety.mjs
+          if ! git diff --quiet -- app.js decision-engine.js app.css index.html service-worker.js manifest.webmanifest; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add app.js decision-engine.js app.css index.html service-worker.js manifest.webmanifest
+            git commit -m 'chore(4.6): freeze generated production source'
+            git push origin HEAD:${GITHUB_REF_NAME}
+          fi
+          CERTIFIED_SHA="$(git rev-parse HEAD)"
+          echo "certified_sha=${CERTIFIED_SHA}" >> "$GITHUB_OUTPUT"
+          echo "CERTIFIED_SHA=${CERTIFIED_SHA}"
+      - name: Prove generators are idempotent on the exact frozen SHA
+        run: |
+          node scripts/apply-lifeos-460-decision-engine.mjs
+          node scripts/harden-lifeos-460-decision-engine.mjs
+          node scripts/harden-lifeos-460-apply-safety.mjs
+          git diff --exit-code
+      - name: Parse all release-critical JavaScript
+        run: |
+          node --check app.js
+          node --check decision-engine.js
+          node --check service-worker.js
+          node --check planning-worker.js
+          node --check scripts/static-qa-460.mjs
+          node --check scripts/build-release-460.mjs
+          node --check tests/decision-460.spec.js
+          node --check tests/decision-performance-460.spec.js
+      - name: Verify frozen identity and non-sacrifice invariants
+        run: |
+          grep -F "const APP_VERSION='4.6.0';" app.js
+          grep -F "const DECISION_ENGINE_VERSION='4.6.0';" app.js
+          grep -F "const DECISION_ENGINE_VERSION='4.6.0';" decision-engine.js
+          grep -F "const RULE_ENGINE_VERSION='4.5.1';" app.js
+          grep -F "const INTELLIGENCE_MODEL_VERSION='4.4.2';" app.js
+          grep -F "const CALENDAR_ENGINE_VERSION='4.3.0';" app.js
+          grep -F "const FORECAST_MODEL_VERSION='4.2.0';" app.js
+          grep -F "const SCHEDULER_VERSION='4.1.0';" app.js
+          grep -F "const RULE_SCHEMA_VERSION=1;" app.js
+          grep -F "const DB_SCHEMA_VERSION=16;" app.js
+          grep -F "class DecisionEngine" decision-engine.js
+          grep -F "class DecisionContextBuilder" decision-engine.js
+          grep -F "class DecisionFeasibilityGate" decision-engine.js
+          grep -F "class DecisionApplyCoordinator" decision-engine.js
+          grep -F "DECISION-STALE-460" decision-engine.js
+          grep -F "DECISION-REVALIDATION-460" decision-engine.js
+          grep -F "keep-current-plan" decision-engine.js
+          grep -F "capacityShortfall" decision-engine.js
+          grep -F "RULEENGINE-ALIGNMENT" decision-engine.js
+          grep -F "PERSONAL-INTELLIGENCE" decision-engine.js
+          ! grep -E '\beval\s*\(' app.js decision-engine.js planning-worker.js
+          ! grep -E '\bnew\s+Function\s*\(' app.js decision-engine.js planning-worker.js
+          ! grep -E 'fetch\s*\(|XMLHttpRequest|WebSocket|EventSource' decision-engine.js
+
+  static:
+    name: Static QA and exact-source parity
+    needs: exact_source
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.exact_source.outputs.certified_sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run LifeOS 4.6 static QA
+        run: node scripts/static-qa-460.mjs | tee static-qa-460.log
+      - name: Build synchronized PWA and standalone from exact SHA
+        env:
+          GITHUB_SHA: ${{ needs.exact_source.outputs.certified_sha }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: node scripts/build-release-460.mjs | tee build-parity-460.log
+      - name: Upload static evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: lifeos-460-static-qa
+          path: |
+            static-qa-460.log
+            build-parity-460.log
+            dist/BUILD_PROVENANCE.json
+            dist/SHA256SUMS.txt
+          retention-days: 30
+
+  browser:
+    name: ${{ matrix.browser }} exact-SHA certification
+    needs: exact_source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 70
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    env:
+      LIFEOS_BROWSER: ${{ matrix.browser }}
+      CERTIFIED_SHA: ${{ needs.exact_source.outputs.certified_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.exact_source.outputs.certified_sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build exact-source harness from retained LifeOS Playwright suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin verify-lifeos-440-ci:refs/remotes/origin/verify-lifeos-440-ci
+          git archive origin/verify-lifeos-440-ci verify-440 | tar -x
+          rm -rf verify-440/pwa
+          mkdir -p verify-440/pwa verify-440/reports
+          cp index.html app.js decision-engine.js app.css planning-worker.js service-worker.js manifest.webmanifest verify-440/pwa/
+          cp -R icons verify-440/pwa/icons
+          cp tests/evidence-correctness.spec.js verify-440/tests/evidence-correctness.spec.js
+          cp tests/rules-450.spec.js verify-440/tests/rules-450.spec.js
+          cp tests/rule-performance-450.spec.js verify-440/tests/rule-performance-450.spec.js
+          cp tests/rule-approval-safety-450.spec.js verify-440/tests/rule-approval-safety-450.spec.js
+          cp tests/rules-451-completion.spec.js verify-440/tests/rules-451-completion.spec.js
+          cp tests/decision-460.spec.js verify-440/tests/decision-460.spec.js
+          cp tests/decision-performance-460.spec.js verify-440/tests/decision-performance-460.spec.js
+          node <<'NODE'
+          const fs=require('fs');
+          const required=(source,oldValue,newValue,label)=>{if(source.includes(newValue))return source;if(!source.includes(oldValue))throw new Error(`Harness alignment failed: ${label}`);return source.replace(oldValue,newValue)};
+          const configPath='verify-440/playwright.config.cjs';
+          let config=fs.readFileSync(configPath,'utf8');
+          config=required(config,"testMatch: ['calendar-430.spec.js', 'intelligence-440.spec.js', 'pwa.spec.js']","testMatch: ['calendar-430.spec.js', 'intelligence-440.spec.js', 'pwa.spec.js', 'evidence-correctness.spec.js', 'rules-450.spec.js', 'rule-performance-450.spec.js', 'rule-approval-safety-450.spec.js', 'rules-451-completion.spec.js', 'decision-460.spec.js', 'decision-performance-460.spec.js']",'Playwright testMatch');
+          if(!config.includes('retries: 0'))throw new Error('Certification requires retries: 0.');
+          fs.writeFileSync(configPath,config);
+          const calendarPath='verify-440/tests/calendar-430.spec.js';let calendar=fs.readFileSync(calendarPath,'utf8');calendar=calendar.replace(/app: '4\.4\.0'/g,"app: '4.6.0'");fs.writeFileSync(calendarPath,calendar);
+          const intelligencePath='verify-440/tests/intelligence-440.spec.js';let intelligence=fs.readFileSync(intelligencePath,'utf8');intelligence=intelligence.replace(/app: '4\.4\.0'/g,"app: '4.6.0'");intelligence=intelligence.replace(/intelligence: '4\.4\.1'/g,"intelligence: '4.4.2'");intelligence=intelligence.replace(/model 4\\\.4\\\.1/g,'model 4\\.4\\.2');fs.writeFileSync(intelligencePath,intelligence);
+          const pwaPath='verify-440/tests/pwa.spec.js';let pwa=fs.readFileSync(pwaPath,'utf8');pwa=pwa.replaceAll('lifeos-shell-4.4.0-','lifeos-shell-4.6.0-');fs.writeFileSync(pwaPath,pwa);
+          const rules450='verify-440/tests/rules-450.spec.js';let r450=fs.readFileSync(rules450,'utf8');r450=r450.replace("app: '4.5.1'","app: '4.6.0'");fs.writeFileSync(rules450,r450);
+          const rules451='verify-440/tests/rules-451-completion.spec.js';let r451=fs.readFileSync(rules451,'utf8');r451=r451.replace("expect(coverage.version).toBe('4.5.1');","expect(coverage.version).toBe('4.6.0');");fs.writeFileSync(rules451,r451);
+          const packagePath='verify-440/package.json';const pkg=JSON.parse(fs.readFileSync(packagePath,'utf8'));pkg.name='lifeos-4-6-decision-engine-certification';pkg.version='4.6.0';fs.writeFileSync(packagePath,JSON.stringify(pkg,null,2)+'\n');
+          NODE
+          grep -F 'retries: 0' verify-440/playwright.config.cjs
+          grep -F 'decision-460.spec.js' verify-440/playwright.config.cjs
+          test "$(sha256sum app.js | awk '{print $1}')" = "$(sha256sum verify-440/pwa/app.js | awk '{print $1}')"
+          test "$(sha256sum decision-engine.js | awk '{print $1}')" = "$(sha256sum verify-440/pwa/decision-engine.js | awk '{print $1}')"
+      - name: Install certification dependencies
+        working-directory: verify-440
+        run: npm install --no-audit --no-fund
+      - name: Install real browser runtime
+        working-directory: verify-440
+        run: npx playwright install --with-deps ${{ matrix.browser }}
+      - name: Run retained plus 4.6 browser certification
+        working-directory: verify-440
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p reports
+          npm test 2>&1 | tee "reports/${LIFEOS_BROWSER}-test.log"
+      - name: Certify zero-failure browser evidence
+        if: success()
+        working-directory: verify-440
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs=require('fs');const browser=process.env.LIFEOS_BROWSER;const report=JSON.parse(fs.readFileSync(`reports/${browser}-results.json`,'utf8'));const stats=report.stats||{};const passed=Number(stats.expected||0),failed=Number(stats.unexpected||0),skipped=Number(stats.skipped||0),flaky=Number(stats.flaky||0);
+          if(failed||skipped||flaky)throw new Error(`Non-green: passed=${passed} failed=${failed} skipped=${skipped} flaky=${flaky}`);
+          if(passed!==75)throw new Error(`Expected 75 Playwright tests, got ${passed}.`);
+          const log=fs.readFileSync(`reports/${browser}-test.log`,'utf8');const internal=log.match(/LIFEOS_INTERNAL_SELF_TEST\s+(\d+)\/(\d+)\s+EvidenceComparison\s+(\d+\/\d+)/);const ruleGroups=log.match(/LIFEOS_RULE_GROUPS\s+(.+)/);const rulePerf=[...log.matchAll(/LIFEOS_RULE_PERF[^\n]+/g)].map(x=>x[0]);const decisionPerf=[...log.matchAll(/LIFEOS_DECISION_PERF[^\n]+/g)].map(x=>x[0]);
+          if(!internal||internal[1]!==internal[2]||Number(internal[2])<492)throw new Error(`Internal self-test not fully green at 4.5.1 baseline or better: ${internal?.[1]}/${internal?.[2]}`);
+          if(internal[3]!=='7/7')throw new Error(`Evidence cohort group not 7/7: ${internal[3]}`);
+          if(!ruleGroups)throw new Error('Missing Rule group marker.');const groups=JSON.parse(ruleGroups[1]);const bad=Object.entries(groups).filter(([,v])=>v.passed!==v.total);if(bad.length)throw new Error(`Rule groups not fully green: ${JSON.stringify(bad)}`);
+          for(const count of [100,500,1000])if(!decisionPerf.some(line=>line.includes(`count=${count} `)))throw new Error(`Missing decision performance marker ${count}`);
+          const lines=[`browser=${browser}`,`exact_sha=${process.env.CERTIFIED_SHA}`,`passed=${passed}`,`failed=${failed}`,`skipped=${skipped}`,`flaky=${flaky}`,'retries=0',`internal=${internal[1]}/${internal[2]}`,`evidence_comparison=${internal[3]}`,`rule_groups=${ruleGroups[1]}`,...rulePerf,...decisionPerf];fs.writeFileSync(`reports/${browser}-certification-summary.txt`,lines.join('\n')+'\n');console.log(lines.join('\n'));
+          NODE
+      - name: Upload browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lifeos-460-${{ matrix.browser }}-evidence
+          path: |
+            verify-440/reports
+            verify-440/test-results
+          if-no-files-found: warn
+          retention-days: 30
+
+  release_package:
+    name: Build authenticated LifeOS 4.6 package
+    needs: [exact_source, static, browser]
+    if: needs.exact_source.result == 'success' && needs.static.result == 'success' && needs.browser.result == 'success'
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CERTIFIED_SHA: ${{ needs.exact_source.outputs.certified_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.exact_source.outputs.certified_sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: lifeos-460-*-evidence
+          path: certification-evidence
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: lifeos-460-static-qa
+          path: static-evidence
+      - name: Build synchronized release assets
+        env:
+          GITHUB_SHA: ${{ needs.exact_source.outputs.certified_sha }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          LIFEOS_RELEASE_TAG: v4.6.0
+        run: node scripts/build-release-460.mjs
+      - name: Verify exact-SHA browser summaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          for browser in chromium firefox webkit; do
+            file="$(find certification-evidence -name "${browser}-certification-summary.txt" -print -quit)"
+            test -n "$file"
+            grep -F "exact_sha=${CERTIFIED_SHA}" "$file"
+            grep -F 'passed=75' "$file"
+            grep -F 'failed=0' "$file"
+            grep -F 'skipped=0' "$file"
+            grep -F 'flaky=0' "$file"
+            grep -F 'retries=0' "$file"
+            grep -F 'evidence_comparison=7/7' "$file"
+          done
+      - name: Create release archive, hashes, provenance and certification report
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd dist && zip -r -9 ../LifeOS_4_6_Decision_Engine_Release.zip .)
+          cp dist/SHA256SUMS.txt FINAL_SHA256SUMS.txt
+          sha256sum LifeOS_4_6_Decision_Engine_Release.zip >> FINAL_SHA256SUMS.txt
+          sha256sum app.js decision-engine.js app.css index.html service-worker.js planning-worker.js manifest.webmanifest >> FINAL_SHA256SUMS.txt
+          sha256sum dist/BUILD_PROVENANCE.json >> FINAL_SHA256SUMS.txt
+          find certification-evidence -type f -print0 | sort -z | xargs -0 sha256sum >> FINAL_SHA256SUMS.txt
+          cat > LIFEOS_4_6_FINAL_DECISION_ENGINE_CERTIFICATION_REPORT.md <<EOF
+          # LifeOS 4.6 — Decision Engine, Goal Alignment & Adaptive Planning
+          ## Final QA & Release Certification Report
+
+          - Repository: ${GITHUB_REPOSITORY}
+          - Exact certified source SHA: ${CERTIFIED_SHA}
+          - Workflow run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+          - APP_VERSION: 4.6.0
+          - DECISION_ENGINE_VERSION: 4.6.0
+          - RULE_ENGINE_VERSION: 4.5.1
+          - INTELLIGENCE_MODEL_VERSION: 4.4.2
+          - CALENDAR_ENGINE_VERSION: 4.3.0
+          - FORECAST_MODEL_VERSION: 4.2.0
+          - SCHEDULER_VERSION: 4.1.0
+          - RULE_SCHEMA_VERSION: 1
+          - DB_SCHEMA_VERSION: 16
+
+          ### Core components
+          - DecisionEngine: PASS
+          - DecisionContextBuilder: PASS
+          - DecisionCandidateGenerator: PASS
+          - DecisionFeasibilityGate: PASS
+          - DecisionTradeoffEngine: PASS
+          - DecisionRankingEngine: PASS
+          - DecisionAlternativeGenerator: PASS
+          - DecisionExplanationEngine: PASS
+          - DecisionPreviewManager: PASS
+          - DecisionApplyCoordinator: PASS
+          - DecisionHistory: PASS
+
+          ### Safety and architecture
+          - Existing LifeOS domain engines remain authoritative: PASS
+          - Hard feasibility before ranking: PASS
+          - Keep Current Plan option: PASS
+          - Benefit + opportunity-cost explanation: PASS
+          - Preview production immutability: PASS
+          - Apply stale fingerprint protection: PASS
+          - Apply hard-constraint revalidation: PASS
+          - Atomic Apply + one Undo path: PASS
+          - Cross-tab exclusive operation lock: PASS
+          - Scenario isolation: PASS
+          - Offline/local-only Decision Engine: PASS
+          - No eval/new Function: PASS
+          - No remote Decision Engine endpoint: PASS
+          - Mobile 390×844 and keyboard Decision Center: PASS
+
+          ### Exact-SHA certification
+          - Static QA: PASS
+          - Internal deterministic baseline: 492/492 or better, all green
+          - Chromium: 75/75 PASS, retries 0
+          - Firefox: 75/75 PASS, retries 0
+          - WebKit: 75/75 PASS, retries 0
+          - Cross-browser total: 225/225 PASS
+          - PWA / Standalone app parity: PASS
+          - PWA / Standalone Decision Engine parity: PASS
+          - SHA-256 release manifest: PASS
+          - Build provenance: PASS
+          EOF
+      - name: Upload authenticated release package
+        uses: actions/upload-artifact@v4
+        with:
+          name: lifeos-460-final-release-package
+          path: |
+            LifeOS_4_6_Decision_Engine_Release.zip
+            dist/LifeOS_4_6_Decision_Engine_Standalone.html
+            dist/BUILD_PROVENANCE.json
+            FINAL_SHA256SUMS.txt
+            LIFEOS_4_6_FINAL_DECISION_ENGINE_CERTIFICATION_REPORT.md
+          retention-days: 90
+      - name: Publish v4.6.0 only from certified main SHA
+        if: github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${CERTIFIED_SHA}"
+          if gh release view v4.6.0 >/dev/null 2>&1; then
+            EXISTING="$(gh api repos/${GITHUB_REPOSITORY}/git/ref/tags/v4.6.0 --jq '.object.sha')"
+            test "$EXISTING" = "$CERTIFIED_SHA"
+            gh release upload v4.6.0 --clobber \
+              LifeOS_4_6_Decision_Engine_Release.zip \
+              dist/LifeOS_4_6_Decision_Engine_Standalone.html \
+              FINAL_SHA256SUMS.txt \
+              dist/BUILD_PROVENANCE.json \
+              LIFEOS_4_6_FINAL_DECISION_ENGINE_CERTIFICATION_REPORT.md
+          else
+            gh release create v4.6.0 \
+              --target "$CERTIFIED_SHA" \
+              --title 'LifeOS 4.6 — Decision Engine, Goal Alignment & Adaptive Planning' \
+              --notes-file LIFEOS_4_6_FINAL_DECISION_ENGINE_CERTIFICATION_REPORT.md \
+              LifeOS_4_6_Decision_Engine_Release.zip \
+              dist/LifeOS_4_6_Decision_Engine_Standalone.html \
+              FINAL_SHA256SUMS.txt \
+              dist/BUILD_PROVENANCE.json \
+              LIFEOS_4_6_FINAL_DECISION_ENGINE_CERTIFICATION_REPORT.md
+          fi
