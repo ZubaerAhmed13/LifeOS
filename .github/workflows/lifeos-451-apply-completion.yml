@@ -30,18 +30,20 @@ jobs:
         run: |
           node scripts/apply-lifeos-451-final-automation.mjs
           node scripts/apply-lifeos-451-race-corrections.mjs
+          node scripts/apply-lifeos-451-test-corrections.mjs
       - name: Parse production source and retained tests
         run: |
           node --check app.js
           node --check service-worker.js
           node --check planning-worker.js
           node --check scripts/apply-lifeos-451-race-corrections.mjs
+          node --check scripts/apply-lifeos-451-test-corrections.mjs
           node --check tests/rules-450.spec.js
           node --check tests/rule-approval-safety-450.spec.js
           node --check tests/rule-performance-450.spec.js
           node --check tests/evidence-correctness.spec.js
           node --check tests/rules-451-completion.spec.js
-      - name: Commit exact generated source and normalized patcher
+      - name: Commit exact generated source and certification corrections
         run: |
           if git diff --quiet; then
             echo 'No generated changes required.'
@@ -49,6 +51,6 @@ jobs:
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add scripts/apply-lifeos-451-final-automation.mjs app.js service-worker.js index.html tests/rules-450.spec.js tests/rule-approval-safety-450.spec.js tests/rule-performance-450.spec.js tests/evidence-correctness.spec.js tests/rules-451-completion.spec.js
+          git add scripts/apply-lifeos-451-final-automation.mjs app.js service-worker.js index.html tests/rules-450.spec.js tests/rule-approval-safety-450.spec.js tests/rule-performance-450.spec.js tests/evidence-correctness.spec.js tests/rules-451-completion.spec.js .github/workflows/lifeos-451-final-certification.yml
           git commit -m 'chore(4.5.1): apply generated completion source'
           git push origin HEAD:fix/lifeos-451-final-automation-completion
