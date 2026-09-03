@@ -27,7 +27,7 @@ test.describe('LifeOS 4.5 retained final evidence correctness', () => {
       };
     });
     expect(result).toEqual({
-      appVersion: '4.5.0',
+      appVersion: '4.5.1',
       intelligenceVersion: '4.4.2',
       sampleSize: 6,
       eligibleCount: 6,

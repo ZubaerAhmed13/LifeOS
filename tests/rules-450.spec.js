@@ -35,7 +35,7 @@ async function installRule(page, overrides = {}) {
       executionPolicy: 'automatic',
       source: 'manual',
       schemaVersion: 1,
-      ruleEngineVersion: '4.5.0'
+      ruleEngineVersion: '4.5.1'
     };
     const saved = await LifeOS.app.ruleEngine.save({ ...base, ...overrides });
     await LifeOS.app.ruleEngine.reindex();
@@ -69,7 +69,7 @@ test.describe('LifeOS 4.5 Rules, Automation & Planning Policies', () => {
       actions: Object.keys(LifeOS.RULE_ACTIONS).length,
       triggers: Object.keys(LifeOS.RULE_TRIGGERS).length
     }));
-    expect(identity).toMatchObject({ app: '4.5.0', rules: '4.5.0', intelligence: '4.4.2', calendar: '4.3.0', forecast: '4.2.0', scheduler: '4.1.0', schema: 16 });
+    expect(identity).toMatchObject({ app: '4.5.1', rules: '4.5.1', intelligence: '4.4.2', calendar: '4.3.0', forecast: '4.2.0', scheduler: '4.1.0', schema: 16 });
     expect(identity.actions).toBeGreaterThanOrEqual(10);
     expect(identity.triggers).toBeGreaterThanOrEqual(10);
   });

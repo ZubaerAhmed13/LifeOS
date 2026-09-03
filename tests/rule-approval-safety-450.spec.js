@@ -37,7 +37,7 @@ async function installRule(page, overrides = {}) {
       executionPolicy: 'ask',
       source: 'manual',
       schemaVersion: 1,
-      ruleEngineVersion: '4.5.0',
+      ruleEngineVersion: '4.5.1',
       ...overrides
     });
     await LifeOS.app.ruleEngine.reindex();

@@ -22,7 +22,7 @@ test.describe('LifeOS 4.5 RuleEngine performance', () => {
           executionPolicy: 'suggestion',
           source: 'manual',
           schemaVersion: 1,
-          ruleEngineVersion: '4.5.0',
+          ruleEngineVersion: '4.5.1',
           createdAt: `2030-01-01T00:00:${String(index % 60).padStart(2, '0')}.000Z`,
           updatedAt: '2030-01-01T00:00:00.000Z',
           revision: 1
