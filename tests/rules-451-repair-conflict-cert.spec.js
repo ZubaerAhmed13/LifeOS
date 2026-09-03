@@ -78,15 +78,16 @@ async function createRepairFixture(page) {
     const preview = await LifeOS.app.service.buildRepair(date, { maxRadius: 4 });
     if (!preview.candidates?.length) throw new Error('Repair fixture did not produce a real ScheduleRepairEngine candidate.');
     const candidate = preview.candidates[0];
-    if (!candidate.changes.some(change => change.id === block.id)) throw new Error('Repair candidate does not move the conflicted certification block.');
+    const change = candidate.changes.find(change => change.id === block.id);
+    if (!change) throw new Error('Repair candidate does not move the conflicted certification block.');
     return {
       date,
       taskId: task.id,
       blockId: block.id,
       eventId: event.id,
       candidateId: candidate.id,
-      originalStart: block.startTime,
-      candidateStart: candidate.changes.find(change => change.id === block.id)?.after?.startTime || ''
+      original: { date: block.date, startTime: block.startTime, endTime: block.endTime },
+      expected: { date: change.after.date, startTime: change.after.startTime, endTime: change.after.endTime }
     };
   });
 }
@@ -108,15 +109,22 @@ test.describe('LifeOS 4.5.1 supplemental repair/conflict certification', () => {
     });
     const fixture = await createRepairFixture(page);
 
-    const preview = await page.evaluate(async date => {
+    const preview = await page.evaluate(async ({ date, blockId }) => {
       const repair = await LifeOS.app.service.buildRepair(date, { maxRadius: 4 });
       if (!repair.candidates?.length) throw new Error('Expected Repair My Day candidate.');
-      const candidateId = repair.candidates[0].id;
-      LifeOS.app.state.set({ pending: { type: 'repair', preview: repair, candidateId } });
-      LifeOS.app.renderRepairPreview(repair, candidateId);
-      return { candidateId, moved: repair.candidates[0].stability.movedBlockCount };
-    }, fixture.date);
+      const candidate = repair.candidates[0];
+      const change = candidate.changes.find(row => row.id === blockId);
+      if (!change) throw new Error('Selected Repair My Day candidate does not include the target block.');
+      LifeOS.app.state.set({ pending: { type: 'repair', preview: repair, candidateId: candidate.id } });
+      LifeOS.app.renderRepairPreview(repair, candidate.id);
+      return {
+        candidateId: candidate.id,
+        moved: candidate.stability.movedBlockCount,
+        expected: { date: change.after.date, startTime: change.after.startTime, endTime: change.after.endTime }
+      };
+    }, { date: fixture.date, blockId: fixture.blockId });
     expect(preview.moved).toBeGreaterThan(0);
+    expect(preview.expected).not.toEqual(fixture.original);
 
     await page.getByRole('button', { name: 'Apply repair' }).click();
     await waitForNotification(page, 'Real schedule-repaired E2E fired');
@@ -130,14 +138,14 @@ test.describe('LifeOS 4.5.1 supplemental repair/conflict certification', () => {
       const observed = history.find(row => row.meta?.ruleExecution?.ruleId === ruleId && row.meta?.ruleExecution?.triggerType === 'schedule-repaired');
       const runtime = await LifeOS.app.ruleEngine.runtime();
       return {
-        startTime: block.startTime,
+        block: { date: block.date, startTime: block.startTime, endTime: block.endTime },
         operationId: repair?.meta?.operationId || '',
         observedStatus: observed?.meta?.ruleExecution?.status || '',
         recentEventIds: runtime.recentEventIds || []
       };
     }, { blockId: fixture.blockId, ruleId: rule.id });
 
-    expect(result.startTime).not.toBe(fixture.originalStart);
+    expect(result.block).toEqual(preview.expected);
     expect(result.operationId).not.toBe('');
     expect(result.observedStatus).toBe('Applied');
     expect(result.recentEventIds).toContain(`schedule-repaired:${result.operationId}`);
@@ -154,24 +162,34 @@ test.describe('LifeOS 4.5.1 supplemental repair/conflict certification', () => {
       executionPolicy: 'automatic'
     });
 
-    const proposed = await page.evaluate(async ({ taskId, ruleId }) => {
+    const proposed = await page.evaluate(async ({ taskId, blockId, ruleId }) => {
       const engine = LifeOS.app.ruleEngine;
       const task = await LifeOS.app.repo.get('tasks', taskId);
       const results = await engine.process(engine.makeEvent('task-updated', 'tasks', task.id, null, task, { eventId: 'r451-run-minimal-repair-trigger' }));
       const pending = (await engine.pendingApprovals()).find(row => row.ruleId === ruleId);
       const action = pending?.proposedActions?.find(row => row.type === 'run-minimal-repair');
+      let expected = null;
+      if (action?.params?.candidateId) {
+        const repair = await LifeOS.app.service.buildRepair(action.params.date, { maxRadius: action.params.maxRadius || 4 });
+        const candidate = repair.candidates.find(row => row.id === action.params.candidateId);
+        const change = candidate?.changes?.find(row => row.id === blockId);
+        if (change) expected = { date: change.after.date, startTime: change.after.startTime, endTime: change.after.endTime };
+      }
       return {
         status: results[0]?.status || '',
         executionId: pending?.executionId || '',
         candidateId: action?.params?.candidateId || '',
-        fingerprint: action?.params?.sourceFingerprint || ''
+        fingerprint: action?.params?.sourceFingerprint || '',
+        expected
       };
-    }, { taskId: fixture.taskId, ruleId: rule.id });
+    }, { taskId: fixture.taskId, blockId: fixture.blockId, ruleId: rule.id });
 
     expect(proposed.status).toBe('Awaiting confirmation');
     expect(proposed.executionId).not.toBe('');
     expect(proposed.candidateId).not.toBe('');
     expect(proposed.fingerprint).not.toBe('');
+    expect(proposed.expected).not.toBeNull();
+    expect(proposed.expected).not.toEqual(fixture.original);
 
     const applied = await page.evaluate(async ({ executionId, blockId, ruleId }) => {
       const result = await LifeOS.app.ruleEngine.confirmPending(executionId);
@@ -181,7 +199,7 @@ test.describe('LifeOS 4.5.1 supplemental repair/conflict certification', () => {
       return {
         status: result.status,
         operationId: result.repairResult?.operationId || '',
-        startTime: block.startTime,
+        block: { date: block.date, startTime: block.startTime, endTime: block.endTime },
         repairCount: repairs.length,
         provenance: repairs[0]?.meta?.ruleExecution || null
       };
@@ -189,7 +207,7 @@ test.describe('LifeOS 4.5.1 supplemental repair/conflict certification', () => {
 
     expect(applied.status).toBe('Applied');
     expect(applied.operationId).not.toBe('');
-    expect(applied.startTime).not.toBe(fixture.originalStart);
+    expect(applied.block).toEqual(proposed.expected);
     expect(applied.repairCount).toBe(1);
     expect(applied.provenance).toMatchObject({
       ruleId: rule.id,
