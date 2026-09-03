@@ -1,0 +1,47 @@
+name: LifeOS 4.5.1 Apply Final Automation Completion
+
+on:
+  push:
+    branches:
+      - fix/lifeos-451-final-automation-completion
+
+permissions:
+  contents: write
+
+concurrency:
+  group: lifeos-451-apply-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    if: ${{ !startsWith(github.event.head_commit.message, 'chore(4.5.1): apply generated completion') }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply guarded 4.5.1 completion patch
+        run: node scripts/apply-lifeos-451-final-automation.mjs
+      - name: Parse production source and retained tests
+        run: |
+          node --check app.js
+          node --check service-worker.js
+          node --check planning-worker.js
+          node --check tests/rules-450.spec.js
+          node --check tests/rule-approval-safety-450.spec.js
+          node --check tests/rule-performance-450.spec.js
+          node --check tests/evidence-correctness.spec.js
+      - name: Commit exact generated source
+        run: |
+          if git diff --quiet; then
+            echo 'No generated changes required.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app.js service-worker.js index.html tests/rules-450.spec.js tests/rule-approval-safety-450.spec.js tests/rule-performance-450.spec.js tests/evidence-correctness.spec.js
+          git commit -m 'chore(4.5.1): apply generated completion source'
+          git push origin HEAD:fix/lifeos-451-final-automation-completion
