@@ -39,7 +39,7 @@ function replaceUnique(source,oldValue,newValue,label){
   const path='tests/rules-451-completion.spec.js';
   const before=fs.readFileSync(path,'utf8');
   let source=before;
-  if(!source.includes('const emittedShortfalls=[];')){
+  if(!source.includes('emittedShortfalls=[];')){
     const start="  test('real active-project mutation produces project-weekly-shortfall through ProjectAllocator', async ({ page }) => {";
     const next="\n\n  test('civil day lifecycle honors configured IANA timezone and DST edge semantics'";
     const startAt=source.indexOf(start);
