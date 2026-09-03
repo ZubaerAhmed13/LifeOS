@@ -22,6 +22,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Normalize guarded patcher signatures
+        run: |
+          node scripts/repair-lifeos-451-patcher.mjs
+          node --check scripts/apply-lifeos-451-final-automation.mjs
       - name: Apply guarded 4.5.1 completion patch
         run: node scripts/apply-lifeos-451-final-automation.mjs
       - name: Parse production source and retained tests
@@ -33,7 +37,7 @@ jobs:
           node --check tests/rule-approval-safety-450.spec.js
           node --check tests/rule-performance-450.spec.js
           node --check tests/evidence-correctness.spec.js
-      - name: Commit exact generated source
+      - name: Commit exact generated source and normalized patcher
         run: |
           if git diff --quiet; then
             echo 'No generated changes required.'
@@ -41,6 +45,6 @@ jobs:
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add app.js service-worker.js index.html tests/rules-450.spec.js tests/rule-approval-safety-450.spec.js tests/rule-performance-450.spec.js tests/evidence-correctness.spec.js
+          git add scripts/apply-lifeos-451-final-automation.mjs app.js service-worker.js index.html tests/rules-450.spec.js tests/rule-approval-safety-450.spec.js tests/rule-performance-450.spec.js tests/evidence-correctness.spec.js
           git commit -m 'chore(4.5.1): apply generated completion source'
           git push origin HEAD:fix/lifeos-451-final-automation-completion
