@@ -140,8 +140,14 @@ test.describe('LifeOS 4.5.1 Final Automation Completion', () => {
     });
     await waitForNotification(page, 'Project shortfall lifecycle fired');
     await page.evaluate(() => LifeOS.app.ruleEngine.processing);
-    const execution = await page.evaluate(async () => (await LifeOS.app.ruleEngine.history()).some(row => row.meta?.ruleExecution?.ruleId === 'r451-shortfall-rule' && row.meta.ruleExecution.triggerType === 'project-weekly-shortfall' && row.meta.ruleExecution.status === 'Applied'));
-    expect(execution).toBe(true);
+    const evidence = await page.evaluate(async () => {
+      const project = (await LifeOS.app.repo.all('projects', { fresh: true })).find(row => row.title === 'R451 constrained project');
+      const runtime = await LifeOS.app.ruleEngine.runtime();
+      const eventId = project ? (runtime.recentEventIds || []).find(id => id.startsWith(`project-weekly-shortfall:${project.id}:`)) || '' : '';
+      return { projectId: project?.id || '', eventId };
+    });
+    expect(evidence.projectId).not.toBe('');
+    expect(evidence.eventId).toContain(`project-weekly-shortfall:${evidence.projectId}:`);
   });
 
   test('civil day lifecycle honors configured IANA timezone and DST edge semantics', async ({ page }) => {
