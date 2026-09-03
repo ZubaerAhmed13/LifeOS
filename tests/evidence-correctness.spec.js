@@ -99,7 +99,7 @@ test.describe('LifeOS 4.5 retained final evidence correctness', () => {
         'Rule Safety', 'Rule Conflict Resolution', 'Rule Loop Prevention', 'Rule Atomic Execution',
         'Rule Undo', 'Rule Concurrency', 'Rule Audit', 'Rule Notifications', 'Planning Policies',
         'Rule Intelligence Integration', 'Rule Scenario Integration', 'Rule Backup', 'Rule Integrity',
-        'Rule Accessibility', 'Rule Privacy'
+        'Rule Accessibility', 'Rule Privacy', 'Rule Registry Coverage', 'Rule Trigger Wiring', 'Rule Action Coverage'
       ];
       return {
         total: value.total,

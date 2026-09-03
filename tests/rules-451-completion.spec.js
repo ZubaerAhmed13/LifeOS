@@ -139,8 +139,9 @@ test.describe('LifeOS 4.5.1 Final Automation Completion', () => {
       });
     });
     await waitForNotification(page, 'Project shortfall lifecycle fired');
-    const runtime = await page.evaluate(() => LifeOS.app.ruleEngine.runtime());
-    expect(Object.keys(runtime.projectShortfallSignatures || {}).length).toBeGreaterThan(0);
+    await page.evaluate(() => LifeOS.app.ruleEngine.processing);
+    const execution = await page.evaluate(async () => (await LifeOS.app.ruleEngine.history()).some(row => row.meta?.ruleExecution?.ruleId === 'r451-shortfall-rule' && row.meta.ruleExecution.triggerType === 'project-weekly-shortfall' && row.meta.ruleExecution.status === 'Applied'));
+    expect(execution).toBe(true);
   });
 
   test('civil day lifecycle honors configured IANA timezone and DST edge semantics', async ({ page }) => {
