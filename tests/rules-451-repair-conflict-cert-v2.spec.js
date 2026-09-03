@@ -108,8 +108,20 @@ async function createRepairFixture(page, { sameDay = false } = {}) {
   }, sameDay);
 }
 
-async function waitForNotification(page, title) {
-  await page.waitForFunction(async title => (await LifeOS.app.repo.all('notifications', { fresh: true })).some(row => row.title === title), title);
+async function waitForRepairCompletion(page, { blockId, ruleId, expected }) {
+  await page.waitForFunction(async ({ blockId, ruleId, expected }) => {
+    await LifeOS.app.ruleEngine.processing;
+    const block = await LifeOS.app.repo.get('timeBlocks', blockId);
+    if (!block || block.date !== expected.date || block.startTime !== expected.startTime || block.endTime !== expected.endTime) return false;
+    const logs = await LifeOS.app.repo.all('activityLog', { fresh: true });
+    const repair = [...logs].reverse().find(row => row.type === 'repair-apply' && row.meta?.operationId);
+    if (!repair) return false;
+    const history = await LifeOS.app.ruleEngine.history();
+    const observed = history.find(row => row.meta?.ruleExecution?.ruleId === ruleId && row.meta?.ruleExecution?.triggerType === 'schedule-repaired');
+    if (observed?.meta?.ruleExecution?.status !== 'Applied') return false;
+    const runtime = await LifeOS.app.ruleEngine.runtime();
+    return (runtime.recentEventIds || []).includes(`schedule-repaired:${repair.meta.operationId}`);
+  }, { blockId, ruleId, expected }, { timeout: 15000 });
 }
 
 test.describe('LifeOS 4.5.1 supplemental repair/conflict certification v2', () => {
@@ -145,27 +157,35 @@ test.describe('LifeOS 4.5.1 supplemental repair/conflict certification v2', () =
     await expect(page.getByRole('heading', { name: 'Repair My Day' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Apply repair' })).toBeVisible();
 
+    const pendingBeforeApply = await page.evaluate(() => {
+      const pending = LifeOS.app.state.get('pending');
+      return { type: pending?.type || '', candidateId: pending?.candidateId || '', sourceFingerprint: pending?.preview?.sourceFingerprint || '' };
+    });
+    expect(pendingBeforeApply).toEqual({ type: 'repair', candidateId: uiPreview.candidateId, sourceFingerprint: uiPreview.sourceFingerprint });
+
     await page.getByRole('button', { name: 'Apply repair' }).click();
-    await waitForNotification(page, 'Real schedule-repaired E2E fired');
+    await waitForRepairCompletion(page, { blockId: fixture.blockId, ruleId: rule.id, expected: uiPreview.expected });
 
     const result = await page.evaluate(async ({ blockId, ruleId }) => {
       await LifeOS.app.ruleEngine.processing;
       const block = await LifeOS.app.repo.get('timeBlocks', blockId);
       const logs = await LifeOS.app.repo.all('activityLog', { fresh: true });
-      const repair = [...logs].reverse().find(row => row.type === 'repair-apply');
+      const repair = [...logs].reverse().find(row => row.type === 'repair-apply' && row.meta?.operationId);
       const history = await LifeOS.app.ruleEngine.history();
       const observed = history.find(row => row.meta?.ruleExecution?.ruleId === ruleId && row.meta?.ruleExecution?.triggerType === 'schedule-repaired');
       const runtime = await LifeOS.app.ruleEngine.runtime();
       const undoState = await LifeOS.app.repo.get('systemMeta', 'undo-history');
       const repairUndo = [...(undoState?.undoStack || [])].reverse().find(row => row.label?.startsWith('Repaired '));
       const undoChange = repairUndo?.changes?.find(row => row.id === blockId);
+      const notification = (await LifeOS.app.repo.all('notifications', { fresh: true })).find(row => row.title === 'Real schedule-repaired E2E fired');
       return {
         block: { date: block.date, startTime: block.startTime, endTime: block.endTime },
         operationId: repair?.meta?.operationId || '',
         observedStatus: observed?.meta?.ruleExecution?.status || '',
         recentEventIds: runtime.recentEventIds || [],
         undoAfter: undoChange?.after ? { date: undoChange.after.date, startTime: undoChange.after.startTime, endTime: undoChange.after.endTime } : null,
-        repairCandidateLabel: repair?.meta?.candidate || ''
+        repairCandidateLabel: repair?.meta?.candidate || '',
+        observerNotificationPresent: Boolean(notification)
       };
     }, { blockId: fixture.blockId, ruleId: rule.id });
 
@@ -174,6 +194,7 @@ test.describe('LifeOS 4.5.1 supplemental repair/conflict certification v2', () =
     expect(result.block).toEqual(uiPreview.expected);
     expect(result.operationId).not.toBe('');
     expect(result.observedStatus).toBe('Applied');
+    expect(result.observerNotificationPresent).toBe(true);
     expect(result.recentEventIds).toContain(`schedule-repaired:${result.operationId}`);
   });
 
