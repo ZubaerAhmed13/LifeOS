@@ -8,7 +8,8 @@ function swap(oldValue,newValue){if(source.includes(oldValue)){source=source.rep
 
 swap(",'deepWorkBefore','planning preference defaults');",",\"deepWorkBefore:'14:00',taskTypePreferredBefore:{}\",'planning preference defaults');");
 swap("'static parts(epochMilliseconds,timeZoneId)','CivilTimeEngine active-date projection'","'civilStatus:analysis.status','CivilTimeEngine active-date projection'");
-swap("app=replaceLine(app,/^    stop\\(\\)\\{.*$/m,stopMethod,'this.lifecycleTimer=0','RuleEngine lifecycle stop');","app=replaceLine(app,/^    stop\\(\\)\\{.*$/m,stopMethod,\"removeEventListener?.('visibilitychange'\",'RuleEngine lifecycle stop');");
+swap("app=replaceLine(app,/^    stop\\(\\)\\{.*$/m,stopMethod,'this.lifecycleTimer=0','RuleEngine lifecycle stop');","app=replaceText(app,\"    stop(){this.unsubscribe?.();this.unsubscribe=null;this.started=false}\",stopMethod,\"removeEventListener?.('visibilitychange'\",'RuleEngine lifecycle stop');");
+swap("app=replaceLine(app,/^    stop\\(\\)\\{.*$/m,stopMethod,\"removeEventListener?.('visibilitychange'\",'RuleEngine lifecycle stop');","app=replaceText(app,\"    stop(){this.unsubscribe?.();this.unsubscribe=null;this.started=false}\",stopMethod,\"removeEventListener?.('visibilitychange'\",'RuleEngine lifecycle stop');");
 swap("app=replaceLine(app,/^    validateSafety\\(rule,event,actions,context\\)\\{.*$/m,validateSafety,'resolveRepairAction(action,context)','complete action safety resolution');","app=replaceLine(app,/^    validateSafety\\(rule,event,actions,context\\)\\{.*$/m,validateSafety,'Minimal schedule repair must be reviewed as a standalone high-impact mutation.','complete action safety resolution');");
 
 const weekStart="app=replaceLine(app,/^    async applyWeekPlan\\(plan\\)\\{.*$/m,weekPlan,'weeklyReviews',{label:'week plan identity'});";
@@ -35,9 +36,6 @@ const oldContext="date=event.current?.date||task?.preferredDate||CoreUtil.localD
 const newContext="civil=TimeZoneEngine.parts(Date.now(),settings.timeZoneId||TimeZoneEngine.deviceTimeZone()||'UTC'),date=event.current?.date||task?.preferredDate||civil.date,capacity=CapacityEngine.summary(date,data,settings),profile=capacity.type?.code||data.dayProfiles.find(row=>row.date===date)?.dayType||'Auto',checkin=[...CoreUtil.array(data.dailyCheckins)].filter(row=>row.date===date).sort((a,b)=>String(b.updatedAt).localeCompare(String(a.updatedAt)))[0],projectShortfall=project?ProjectAllocator.shortfall(project,data.tasks,CoreUtil.startOfWeek(date),data,settings):null,repairs=CoreUtil.array(data.activityLog).filter(row=>row.type==='repair-apply').sort((a,b)=>String(b.at).localeCompare(String(a.at))),stability=CoreUtil.num(repairs[0]?.meta?.stability,100),time=civil.time";
 swap(oldContext,newContext);
 
-// The first 4.5.1 generation may already have inserted the helper block before these
-// corrections were discovered. Add explicit replayable method replacements so rerunning
-// the generator repairs an already-generated branch as well as a clean 4.5.0 baseline.
 if(!source.includes("'RULE-OPERATION-WAIT-019','bounded external-operation wait'")){
   const anchor="const makeEvent=\"    makeEvent(type,store,id,previous,current,extra={})";
   const correction=String.raw`const externalWaitMethod="    async waitForExternalOperation(){for(let index=0;index<500&&this.operationLocks?.currentOperation&&!String(this.operationLocks.currentOperation).startsWith('Rule ');index++)await new Promise(resolve=>setTimeout(resolve,10));if(this.operationLocks?.currentOperation&&!String(this.operationLocks.currentOperation).startsWith('Rule '))throw CoreUtil.error('RULE-OPERATION-WAIT-019','Planning operation did not settle before rule evaluation.')}";
