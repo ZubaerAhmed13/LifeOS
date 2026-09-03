@@ -43,7 +43,7 @@ jobs:
         run: |
           grep -F 'async isExplicitHistoryReplay(stores)' app.js
           grep -F 'if(await this.isExplicitHistoryReplay(stores))' app.js
-          grep -F 'const emittedShortfalls=[];' tests/rules-451-completion.spec.js
+          grep -F 'emittedShortfalls=[];' tests/rules-451-completion.spec.js
           grep -F 'explicit Undo/Redo automation suppression' scripts/static-qa-451.mjs
           grep -F 'LIFEOS_451_CORRECTION_CHILD' scripts/repair-lifeos-451-patcher.mjs
       - name: Commit generated corrected source
