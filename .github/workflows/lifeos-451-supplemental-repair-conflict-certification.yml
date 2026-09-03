@@ -1,0 +1,227 @@
+name: LifeOS 4.5.1 Supplemental Repair & Conflict Certification
+
+on:
+  push:
+    branches:
+      - cert/lifeos-451-repair-conflict-e2e
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: lifeos-451-supplemental-repair-conflict-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CERTIFIED_PRODUCT_SHA: da8a523e64a311cc73eadcf9dc015eec51fa51c4
+
+jobs:
+  exact_product:
+    name: Exact released-product identity gate
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Prove certification branch does not alter released product source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+          test "$(git rev-parse 'v4.5.1^{commit}')" = "$CERTIFIED_PRODUCT_SHA"
+          git diff --exit-code "$CERTIFIED_PRODUCT_SHA" -- \
+            app.js app.css index.html service-worker.js planning-worker.js manifest.webmanifest icons
+          changed="$(git diff --name-only "$CERTIFIED_PRODUCT_SHA"...HEAD | grep -Ev '^(tests/rules-451-repair-conflict-cert\.spec\.js|\.github/workflows/lifeos-451-supplemental-repair-conflict-certification\.yml)$' || true)"
+          if [ -n "$changed" ]; then
+            echo "Unexpected non-certification files changed:"
+            echo "$changed"
+            exit 1
+          fi
+          node --check tests/rules-451-repair-conflict-cert.spec.js
+          grep -F "const APP_VERSION='4.5.1';" app.js
+          grep -F "const RULE_ENGINE_VERSION='4.5.1';" app.js
+          grep -F "const DB_SCHEMA_VERSION=16;" app.js
+          echo "CERTIFIED_PRODUCT_SHA=$CERTIFIED_PRODUCT_SHA"
+          echo "CERTIFICATION_COMMIT=$GITHUB_SHA"
+
+  browser:
+    name: supplemental-${{ matrix.browser }}
+    needs: exact_product
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    env:
+      LIFEOS_BROWSER: ${{ matrix.browser }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build exact released-product browser harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin verify-lifeos-440-ci:refs/remotes/origin/verify-lifeos-440-ci
+          git archive origin/verify-lifeos-440-ci verify-440 | tar -x
+          rm -rf verify-440/pwa
+          mkdir -p verify-440/pwa verify-440/reports
+          for file in index.html app.js app.css planning-worker.js service-worker.js manifest.webmanifest; do
+            git show "$CERTIFIED_PRODUCT_SHA:$file" > "verify-440/pwa/$file"
+          done
+          git archive "$CERTIFIED_PRODUCT_SHA" icons | tar -x -C verify-440/pwa
+          cp tests/evidence-correctness.spec.js verify-440/tests/evidence-correctness.spec.js
+          cp tests/rules-450.spec.js verify-440/tests/rules-450.spec.js
+          cp tests/rule-performance-450.spec.js verify-440/tests/rule-performance-450.spec.js
+          cp tests/rule-approval-safety-450.spec.js verify-440/tests/rule-approval-safety-450.spec.js
+          cp tests/rules-451-completion.spec.js verify-440/tests/rules-451-completion.spec.js
+          cp tests/rules-451-repair-conflict-cert.spec.js verify-440/tests/rules-451-repair-conflict-cert.spec.js
+          node <<'NODE'
+          const fs=require('fs');
+          const required=(source,oldValue,newValue,label)=>{if(source.includes(newValue))return source;if(!source.includes(oldValue))throw new Error(`Harness alignment failed: ${label}`);return source.replace(oldValue,newValue)};
+          const configPath='verify-440/playwright.config.cjs';
+          let config=fs.readFileSync(configPath,'utf8');
+          config=required(config,"testMatch: ['calendar-430.spec.js', 'intelligence-440.spec.js', 'pwa.spec.js']","testMatch: ['calendar-430.spec.js', 'intelligence-440.spec.js', 'pwa.spec.js', 'evidence-correctness.spec.js', 'rules-450.spec.js', 'rule-performance-450.spec.js', 'rule-approval-safety-450.spec.js', 'rules-451-completion.spec.js', 'rules-451-repair-conflict-cert.spec.js']",'Playwright testMatch');
+          if(!config.includes('retries: 0'))throw new Error('Certification requires retries: 0.');
+          fs.writeFileSync(configPath,config);
+          const calendarPath='verify-440/tests/calendar-430.spec.js';let calendar=fs.readFileSync(calendarPath,'utf8');calendar=calendar.replace(/app: '4\.4\.0'/g,"app: '4.5.1'");fs.writeFileSync(calendarPath,calendar);
+          const intelligencePath='verify-440/tests/intelligence-440.spec.js';let intelligence=fs.readFileSync(intelligencePath,'utf8');intelligence=intelligence.replace(/app: '4\.4\.0'/g,"app: '4.5.1'");intelligence=intelligence.replace(/intelligence: '4\.4\.1'/g,"intelligence: '4.4.2'");intelligence=intelligence.replace(/model 4\\\.4\\\.1/g,'model 4\\.4\\.2');fs.writeFileSync(intelligencePath,intelligence);
+          const pwaPath='verify-440/tests/pwa.spec.js';let pwa=fs.readFileSync(pwaPath,'utf8');pwa=pwa.replaceAll('lifeos-shell-4.4.0-','lifeos-shell-4.5.1-');fs.writeFileSync(pwaPath,pwa);
+          const packagePath='verify-440/package.json';const pkg=JSON.parse(fs.readFileSync(packagePath,'utf8'));pkg.name='lifeos-4-5-1-supplemental-repair-conflict-certification';pkg.version='4.5.1';fs.writeFileSync(packagePath,JSON.stringify(pkg,null,2)+'\n');
+          NODE
+          grep -F 'retries: 0' verify-440/playwright.config.cjs
+          grep -F 'rules-451-repair-conflict-cert.spec.js' verify-440/playwright.config.cjs
+          test "$(sha256sum verify-440/pwa/app.js | awk '{print $1}')" = "$(git show "$CERTIFIED_PRODUCT_SHA:app.js" | sha256sum | awk '{print $1}')"
+      - name: Install certification dependencies
+        working-directory: verify-440
+        run: npm install --no-audit --no-fund
+      - name: Install real browser runtime
+        working-directory: verify-440
+        run: npx playwright install --with-deps ${{ matrix.browser }}
+      - name: Run retained plus supplemental browser certification
+        working-directory: verify-440
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p reports
+          npm test 2>&1 | tee "reports/${LIFEOS_BROWSER}-supplemental-test.log"
+      - name: Certify zero-failure supplemental evidence
+        if: success()
+        working-directory: verify-440
+        shell: bash
+        env:
+          CERTIFICATION_COMMIT: ${{ github.sha }}
+        run: |
+          node <<'NODE'
+          const fs=require('fs');
+          const browser=process.env.LIFEOS_BROWSER;
+          const report=JSON.parse(fs.readFileSync(`reports/${browser}-results.json`,'utf8'));
+          const stats=report.stats||{};
+          const passed=Number(stats.expected||0),failed=Number(stats.unexpected||0),skipped=Number(stats.skipped||0),flaky=Number(stats.flaky||0);
+          if(failed||skipped||flaky)throw new Error(`Non-green: passed=${passed} failed=${failed} skipped=${skipped} flaky=${flaky}`);
+          if(passed!==64)throw new Error(`Expected 64 Playwright tests, got ${passed}.`);
+          const log=fs.readFileSync(`reports/${browser}-supplemental-test.log`,'utf8');
+          const requiredTests=[
+            'real Repair My Day apply emits schedule-repaired and executes a schedule-repaired rule',
+            'run-minimal-repair browser apply uses approval, real repair service, provenance, and one repair mutation',
+            'competing planning preferences resolve by rule priority and lower priority cannot overwrite the winner',
+            'repair-generated schedule-repaired event is lineage-safe and cannot re-trigger its source repair rule'
+          ];
+          for(const title of requiredTests)if(!log.includes(title))throw new Error(`Missing supplemental browser evidence: ${title}`);
+          const internal=log.match(/LIFEOS_INTERNAL_SELF_TEST\s+(\d+)\/(\d+)\s+EvidenceComparison\s+(\d+\/\d+)/);
+          if(!internal||internal[1]!==internal[2])throw new Error(`Internal self-test not fully green: ${internal?.[1]}/${internal?.[2]}`);
+          if(internal[3]!=='7/7')throw new Error(`EvidenceComparison not 7/7: ${internal[3]}`);
+          const lines=[
+            `browser=${browser}`,
+            `product_sha=${process.env.CERTIFIED_PRODUCT_SHA}`,
+            `certification_commit=${process.env.CERTIFICATION_COMMIT}`,
+            `passed=${passed}`,
+            `failed=${failed}`,
+            `skipped=${skipped}`,
+            `flaky=${flaky}`,
+            'retries=0',
+            `internal=${internal[1]}/${internal[2]}`,
+            `evidence_comparison=${internal[3]}`,
+            'real_schedule_repaired_e2e=PASS',
+            'run_minimal_repair_apply_e2e=PASS',
+            'preference_conflict_priority_e2e=PASS',
+            'repair_loop_prevention_e2e=PASS'
+          ];
+          fs.writeFileSync(`reports/${browser}-supplemental-summary.txt`,lines.join('\n')+'\n');
+          console.log(lines.join('\n'));
+          NODE
+      - name: Upload supplemental browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lifeos-451-supplemental-${{ matrix.browser }}-evidence
+          path: |
+            verify-440/reports
+            verify-440/test-results
+          if-no-files-found: warn
+          retention-days: 90
+
+  certification_report:
+    name: Authenticate supplemental certification report
+    needs: [exact_product, browser]
+    if: needs.exact_product.result == 'success' && needs.browser.result == 'success'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: lifeos-451-supplemental-*-evidence
+          path: evidence
+          merge-multiple: true
+      - name: Verify all three browser summaries and write report
+        shell: bash
+        run: |
+          set -euo pipefail
+          for browser in chromium firefox webkit; do
+            file="$(find evidence -name "${browser}-supplemental-summary.txt" -print -quit)"
+            test -n "$file"
+            grep -F "product_sha=${CERTIFIED_PRODUCT_SHA}" "$file"
+            grep -F 'passed=64' "$file"
+            grep -F 'failed=0' "$file"
+            grep -F 'skipped=0' "$file"
+            grep -F 'flaky=0' "$file"
+            grep -F 'retries=0' "$file"
+            grep -F 'evidence_comparison=7/7' "$file"
+            grep -F 'real_schedule_repaired_e2e=PASS' "$file"
+            grep -F 'run_minimal_repair_apply_e2e=PASS' "$file"
+            grep -F 'preference_conflict_priority_e2e=PASS' "$file"
+            grep -F 'repair_loop_prevention_e2e=PASS' "$file"
+          done
+          cat > LIFEOS_4_5_1_SUPPLEMENTAL_REPAIR_CONFLICT_CERTIFICATION.md <<EOF
+          # LifeOS 4.5.1 Supplemental Repair & Conflict Certification
+
+          - Exact released product SHA: \`${CERTIFIED_PRODUCT_SHA}\`
+          - Certification-only commit: \`${GITHUB_SHA}\`
+          - Product source changed by this certification: NO
+          - Chromium: 64/64 PASS, retries 0
+          - Firefox: 64/64 PASS, retries 0
+          - WebKit: 64/64 PASS, retries 0
+          - Cross-browser total: 192/192 PASS
+          - Real \`schedule-repaired\` browser E2E: PASS
+          - \`run-minimal-repair\` approval + apply browser E2E: PASS
+          - Planning-preference conflict-priority browser E2E: PASS
+          - Repair lineage / loop-prevention browser E2E: PASS
+          - Retained 59-test release certification coverage: PASS in the same runs
+          - EvidenceComparison: 7/7 PASS
+          EOF
+      - name: Upload authenticated supplemental certification
+        uses: actions/upload-artifact@v4
+        with:
+          name: lifeos-451-supplemental-repair-conflict-certification
+          path: |
+            LIFEOS_4_5_1_SUPPLEMENTAL_REPAIR_CONFLICT_CERTIFICATION.md
+            evidence
+          retention-days: 90
