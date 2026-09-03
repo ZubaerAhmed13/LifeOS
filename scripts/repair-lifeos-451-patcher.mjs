@@ -27,16 +27,31 @@ app=replaceLine(app,/^    async openPendingRule.*$/m,openPendingRule,'this.ruleA
   changed=true;
 }
 
-// Replace the zero-delay lock spin with a bounded real wait. Manual schedule operations
-// can legitimately hold the cross-tab operation lock while repository change events queue.
 const oldWait="async waitForExternalOperation(){for(let index=0;index<200&&this.operationLocks?.currentOperation&&!String(this.operationLocks.currentOperation).startsWith('Rule ');index++)await new Promise(resolve=>setTimeout(resolve,0))}";
 const newWait="async waitForExternalOperation(){for(let index=0;index<500&&this.operationLocks?.currentOperation&&!String(this.operationLocks.currentOperation).startsWith('Rule ');index++)await new Promise(resolve=>setTimeout(resolve,10));if(this.operationLocks?.currentOperation&&!String(this.operationLocks.currentOperation).startsWith('Rule '))throw CoreUtil.error('RULE-OPERATION-WAIT-019','Planning operation did not settle before rule evaluation.')}";
 swap(oldWait,newWait);
 
-// Context time must follow LifeOS's configured civil time rather than the host/browser zone.
 const oldContext="date=event.current?.date||task?.preferredDate||CoreUtil.localDate(),capacity=CapacityEngine.summary(date,data,settings),profile=capacity.type?.code||data.dayProfiles.find(row=>row.date===date)?.dayType||'Auto',checkin=[...CoreUtil.array(data.dailyCheckins)].filter(row=>row.date===date).sort((a,b)=>String(b.updatedAt).localeCompare(String(a.updatedAt)))[0],projectShortfall=project?ProjectAllocator.shortfall(project,data.tasks,CoreUtil.startOfWeek(date),data,settings):null,repairs=CoreUtil.array(data.activityLog).filter(row=>row.type==='repair-apply').sort((a,b)=>String(b.at).localeCompare(String(a.at))),stability=CoreUtil.num(repairs[0]?.meta?.stability,100),now=new Date(),time=String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0')";
 const newContext="civil=TimeZoneEngine.parts(Date.now(),settings.timeZoneId||TimeZoneEngine.deviceTimeZone()||'UTC'),date=event.current?.date||task?.preferredDate||civil.date,capacity=CapacityEngine.summary(date,data,settings),profile=capacity.type?.code||data.dayProfiles.find(row=>row.date===date)?.dayType||'Auto',checkin=[...CoreUtil.array(data.dailyCheckins)].filter(row=>row.date===date).sort((a,b)=>String(b.updatedAt).localeCompare(String(a.updatedAt)))[0],projectShortfall=project?ProjectAllocator.shortfall(project,data.tasks,CoreUtil.startOfWeek(date),data,settings):null,repairs=CoreUtil.array(data.activityLog).filter(row=>row.type==='repair-apply').sort((a,b)=>String(b.at).localeCompare(String(a.at))),stability=CoreUtil.num(repairs[0]?.meta?.stability,100),time=civil.time";
 swap(oldContext,newContext);
+
+// The first 4.5.1 generation may already have inserted the helper block before these
+// corrections were discovered. Add explicit replayable method replacements so rerunning
+// the generator repairs an already-generated branch as well as a clean 4.5.0 baseline.
+if(!source.includes("'RULE-OPERATION-WAIT-019','bounded external-operation wait'")){
+  const anchor="const makeEvent=\"    makeEvent(type,store,id,previous,current,extra={})";
+  const correction=String.raw`const externalWaitMethod="    async waitForExternalOperation(){for(let index=0;index<500&&this.operationLocks?.currentOperation&&!String(this.operationLocks.currentOperation).startsWith('Rule ');index++)await new Promise(resolve=>setTimeout(resolve,10));if(this.operationLocks?.currentOperation&&!String(this.operationLocks.currentOperation).startsWith('Rule '))throw CoreUtil.error('RULE-OPERATION-WAIT-019','Planning operation did not settle before rule evaluation.')}";
+app=replaceLine(app,/^    async waitForExternalOperation\(\)\{.*$/m,externalWaitMethod,'RULE-OPERATION-WAIT-019','bounded external-operation wait');
+
+const civilContextMethod="    context(event,data,settings){const task=event.entityType==='task'?event.current||data.tasks.find(row=>row.id===event.entityId):event.current?.taskId?data.tasks.find(row=>row.id===event.current.taskId):null,project=(task?.projectId?data.projects.find(row=>row.id===task.projectId):event.entityType==='project'?event.current:null)||null,civil=TimeZoneEngine.parts(Date.now(),settings.timeZoneId||TimeZoneEngine.deviceTimeZone()||'UTC'),date=event.current?.date||task?.preferredDate||civil.date,capacity=CapacityEngine.summary(date,data,settings),profile=capacity.type?.code||data.dayProfiles.find(row=>row.date===date)?.dayType||'Auto',checkin=[...CoreUtil.array(data.dailyCheckins)].filter(row=>row.date===date).sort((a,b)=>String(b.updatedAt).localeCompare(String(a.updatedAt)))[0],projectShortfall=project?ProjectAllocator.shortfall(project,data.tasks,CoreUtil.startOfWeek(date),data,settings):null,repairs=CoreUtil.array(data.activityLog).filter(row=>row.type==='repair-apply').sort((a,b)=>String(b.at).localeCompare(String(a.at))),stability=CoreUtil.num(repairs[0]?.meta?.stability,100),time=civil.time,flexibleFocus=CoreUtil.array(data.timeBlocks).filter(block=>block.date===date&&block.type==='task'&&!block.locked).reduce((sum,block)=>sum+CoreUtil.num(block.duration),0),recovery=RecoveryTimeEngine.windows(data,settings,date),recoveryState=recovery.some(row=>row.protected)?'Protected':recovery.length?'Preferred':'None';return{event,data,settings,task,project,date,capacity,profile,checkin,projectShortfall,stability,time,flexibleFocus,recoveryState}}";
+app=replaceLine(app,/^    context\(event,data,settings\)\{.*$/m,civilContextMethod,"civil=TimeZoneEngine.parts(Date.now()",'configured civil-time rule context');
+
+`;
+  const position=source.indexOf(anchor);
+  if(position<0)throw new Error('Could not add replayable 4.5.1 lifecycle corrections.');
+  source=source.slice(0,position)+correction+source.slice(position);
+  changed=true;
+}
 
 if(changed)fs.writeFileSync(path,source);
 console.log(changed?'Repaired LifeOS 4.5.1 patcher guards.':'LifeOS 4.5.1 patcher guards already repaired.');
