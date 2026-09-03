@@ -36,13 +36,13 @@ jobs:
           test "$(git rev-parse 'v4.5.1^{commit}')" = "$CERTIFIED_PRODUCT_SHA"
           git diff --exit-code "$CERTIFIED_PRODUCT_SHA" -- \
             app.js app.css index.html service-worker.js planning-worker.js manifest.webmanifest icons
-          changed="$(git diff --name-only "$CERTIFIED_PRODUCT_SHA"...HEAD | grep -Ev '^(tests/rules-451-repair-conflict-cert\.spec\.js|\.github/workflows/lifeos-451-supplemental-repair-conflict-certification\.yml)$' || true)"
+          changed="$(git diff --name-only "$CERTIFIED_PRODUCT_SHA"...HEAD | grep -Ev '^(tests/rules-451-repair-conflict-cert(-v2)?\.spec\.js|\.github/workflows/lifeos-451-supplemental-repair-conflict-certification\.yml)$' || true)"
           if [ -n "$changed" ]; then
             echo "Unexpected non-certification files changed:"
             echo "$changed"
             exit 1
           fi
-          node --check tests/rules-451-repair-conflict-cert.spec.js
+          node --check tests/rules-451-repair-conflict-cert-v2.spec.js
           grep -F "const APP_VERSION='4.5.1';" app.js
           grep -F "const RULE_ENGINE_VERSION='4.5.1';" app.js
           grep -F "const DB_SCHEMA_VERSION=16;" app.js
@@ -84,13 +84,13 @@ jobs:
           cp tests/rule-performance-450.spec.js verify-440/tests/rule-performance-450.spec.js
           cp tests/rule-approval-safety-450.spec.js verify-440/tests/rule-approval-safety-450.spec.js
           cp tests/rules-451-completion.spec.js verify-440/tests/rules-451-completion.spec.js
-          cp tests/rules-451-repair-conflict-cert.spec.js verify-440/tests/rules-451-repair-conflict-cert.spec.js
+          cp tests/rules-451-repair-conflict-cert-v2.spec.js verify-440/tests/rules-451-repair-conflict-cert-v2.spec.js
           node <<'NODE'
           const fs=require('fs');
           const required=(source,oldValue,newValue,label)=>{if(source.includes(newValue))return source;if(!source.includes(oldValue))throw new Error(`Harness alignment failed: ${label}`);return source.replace(oldValue,newValue)};
           const configPath='verify-440/playwright.config.cjs';
           let config=fs.readFileSync(configPath,'utf8');
-          config=required(config,"testMatch: ['calendar-430.spec.js', 'intelligence-440.spec.js', 'pwa.spec.js']","testMatch: ['calendar-430.spec.js', 'intelligence-440.spec.js', 'pwa.spec.js', 'evidence-correctness.spec.js', 'rules-450.spec.js', 'rule-performance-450.spec.js', 'rule-approval-safety-450.spec.js', 'rules-451-completion.spec.js', 'rules-451-repair-conflict-cert.spec.js']",'Playwright testMatch');
+          config=required(config,"testMatch: ['calendar-430.spec.js', 'intelligence-440.spec.js', 'pwa.spec.js']","testMatch: ['calendar-430.spec.js', 'intelligence-440.spec.js', 'pwa.spec.js', 'evidence-correctness.spec.js', 'rules-450.spec.js', 'rule-performance-450.spec.js', 'rule-approval-safety-450.spec.js', 'rules-451-completion.spec.js', 'rules-451-repair-conflict-cert-v2.spec.js']",'Playwright testMatch');
           if(!config.includes('retries: 0'))throw new Error('Certification requires retries: 0.');
           fs.writeFileSync(configPath,config);
           const calendarPath='verify-440/tests/calendar-430.spec.js';let calendar=fs.readFileSync(calendarPath,'utf8');calendar=calendar.replace(/app: '4\.4\.0'/g,"app: '4.5.1'");fs.writeFileSync(calendarPath,calendar);
@@ -99,7 +99,7 @@ jobs:
           const packagePath='verify-440/package.json';const pkg=JSON.parse(fs.readFileSync(packagePath,'utf8'));pkg.name='lifeos-4-5-1-supplemental-repair-conflict-certification';pkg.version='4.5.1';fs.writeFileSync(packagePath,JSON.stringify(pkg,null,2)+'\n');
           NODE
           grep -F 'retries: 0' verify-440/playwright.config.cjs
-          grep -F 'rules-451-repair-conflict-cert.spec.js' verify-440/playwright.config.cjs
+          grep -F 'rules-451-repair-conflict-cert-v2.spec.js' verify-440/playwright.config.cjs
           test "$(sha256sum verify-440/pwa/app.js | awk '{print $1}')" = "$(git show "$CERTIFIED_PRODUCT_SHA:app.js" | sha256sum | awk '{print $1}')"
       - name: Install certification dependencies
         working-directory: verify-440
@@ -131,7 +131,7 @@ jobs:
           if(passed!==64)throw new Error(`Expected 64 Playwright tests, got ${passed}.`);
           const log=fs.readFileSync(`reports/${browser}-supplemental-test.log`,'utf8');
           const requiredTests=[
-            'real Repair My Day apply emits schedule-repaired and executes a schedule-repaired rule',
+            'real Repair My Day browser E2E applies its stored candidate, emits schedule-repaired, and executes the observer rule',
             'run-minimal-repair browser apply uses approval, real repair service, provenance, and one repair mutation',
             'competing planning preferences resolve by rule priority and lower priority cannot overwrite the winner',
             'repair-generated schedule-repaired event is lineage-safe and cannot re-trigger its source repair rule'
