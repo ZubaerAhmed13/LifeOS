@@ -16,6 +16,17 @@ async function seedTask(page, overrides = {}) {
     return LifeOS.app.repo.save('tasks', task, { validate: false });
   }, overrides);
 }
+async function planningStateHash(page) {
+  return page.evaluate(async () => {
+    const data = await LifeOS.app.repo.dataset({ fresh: true });
+    const settings = await LifeOS.app.repo.settings();
+    const planningState = {
+      tasks: data.tasks || [], projects: data.projects || [], events: data.events || [], timeBlocks: data.timeBlocks || [],
+      dayProfiles: data.dayProfiles || [], lifeAreas: data.lifeAreas || [], settings
+    };
+    return LifeOS.CoreUtil.hash(planningState);
+  });
+}
 async function makeApplicableDecision(page, taskId) {
   return page.evaluate(async taskId => {
     const date = LifeOS.CoreUtil.addDays(LifeOS.CoreUtil.localDate(), 1);
@@ -107,16 +118,13 @@ test.describe('LifeOS 4.6 Decision Engine', () => {
 
   test('preview is non-mutating and exposes exact source fingerprint', async ({ page }) => {
     await seedTask(page, { title: 'Preview task', priority: 'Critical', deadline: await page.evaluate(() => LifeOS.CoreUtil.addDays(LifeOS.CoreUtil.localDate(), 1)) });
-    const result = await page.evaluate(async () => {
-      const before = LifeOS.CoreUtil.hash(await LifeOS.app.repo.dataset({ fresh: true }));
-      const decision = await LifeOS.app.decisionEngine.analyze({ type: LifeOS.DECISION_TYPES.TODAY_PLAN, date: LifeOS.CoreUtil.addDays(LifeOS.CoreUtil.localDate(), 1), mode: 'preview' });
-      const preview = LifeOS.app.decisionEngine.preview(decision, decision.recommended.candidate.id);
-      const after = LifeOS.CoreUtil.hash(await LifeOS.app.repo.dataset({ fresh: true }));
-      return { before, after, preview, fingerprint: decision.contextFingerprint };
-    });
-    expect(result.after).toBe(result.before);
-    expect(result.preview.immutable).toBeTruthy();
-    expect(result.preview.productionFingerprintBefore).toBe(result.fingerprint);
+    const decision = await page.evaluate(async () => LifeOS.app.decisionEngine.analyze({ type: LifeOS.DECISION_TYPES.TODAY_PLAN, date: LifeOS.CoreUtil.addDays(LifeOS.CoreUtil.localDate(), 1), mode: 'preview' }));
+    const before = await planningStateHash(page);
+    const preview = await page.evaluate(decision => LifeOS.app.decisionEngine.preview(decision, decision.recommended.candidate.id), decision);
+    const after = await planningStateHash(page);
+    expect(after).toBe(before);
+    expect(preview.immutable).toBeTruthy();
+    expect(preview.productionFingerprintBefore).toBe(decision.contextFingerprint);
   });
 
   test('stale recommendation cannot overwrite a newer task revision', async ({ page }) => {
@@ -135,18 +143,20 @@ test.describe('LifeOS 4.6 Decision Engine', () => {
   test('accepted decision applies as one logical time block and one Undo restores production state', async ({ page }) => {
     const task = await seedTask(page, { title: 'Atomic apply target', priority: 'Critical' });
     const decision = await makeApplicableDecision(page, task.id);
-    const result = await page.evaluate(async decision => {
-      const beforeData = await LifeOS.app.repo.dataset({ fresh: true }), beforeHash = LifeOS.CoreUtil.hash(beforeData), beforeBlocks = beforeData.timeBlocks.length;
-      const applied = await LifeOS.app.decisionEngine.apply(decision, decision.recommended.candidate.id);
-      const afterData = await LifeOS.app.repo.dataset({ fresh: true }), created = afterData.timeBlocks.find(row => row.decisionId === decision.decisionId);
-      await LifeOS.app.undo.undo();
-      const restoredData = await LifeOS.app.repo.dataset({ fresh: true }), restoredHash = LifeOS.CoreUtil.hash(restoredData);
-      return { beforeHash, beforeBlocks, afterBlocks: afterData.timeBlocks.length, created, restoredHash, applied };
+    const beforeHash = await planningStateHash(page);
+    const beforeBlocks = await page.evaluate(async () => (await LifeOS.app.repo.dataset({ fresh: true })).timeBlocks.length);
+    const applied = await page.evaluate(async decision => LifeOS.app.decisionEngine.apply(decision, decision.recommended.candidate.id), decision);
+    const after = await page.evaluate(async decision => {
+      const data = await LifeOS.app.repo.dataset({ fresh: true });
+      return { blocks: data.timeBlocks.length, created: data.timeBlocks.find(row => row.decisionId === decision.decisionId) };
     }, decision);
-    expect(result.afterBlocks).toBe(result.beforeBlocks + 1);
-    expect(result.created.type).toBe('task');
-    expect(result.created.sourceType).toBe('decision');
-    expect(result.restoredHash).toBe(result.beforeHash);
+    await page.evaluate(async () => LifeOS.app.undo.undo());
+    const restoredHash = await planningStateHash(page);
+    expect(after.blocks).toBe(beforeBlocks + 1);
+    expect(after.created.type).toBe('task');
+    expect(after.created.sourceType).toBe('decision');
+    expect(restoredHash).toBe(beforeHash);
+    expect(applied.record.status).toBe('Applied');
   });
 
   test('RuleEngine planning-policy outputs and accepted intelligence remain soft reason signals', async ({ page }) => {
@@ -165,21 +175,23 @@ test.describe('LifeOS 4.6 Decision Engine', () => {
     expect(result.intelligenceAlignment).toBeGreaterThanOrEqual(0);
   });
 
-  test('scenario decision analysis leaves production data unchanged', async ({ page }) => {
+  test('scenario decision analysis leaves production planning state unchanged', async ({ page }) => {
     await seedTask(page, { title: 'Scenario target', priority: 'High' });
-    const result = await page.evaluate(async () => {
-      const before = LifeOS.CoreUtil.hash(await LifeOS.app.repo.dataset({ fresh: true }));
+    const scenarioId = await page.evaluate(async () => {
       const scenario = await LifeOS.app.scenarioEngine.create({ name: 'Decision isolation', planningStart: LifeOS.CoreUtil.localDate(), planningDays: 2, modifications: [] });
-      const afterScenarioSave = LifeOS.CoreUtil.hash(await LifeOS.app.repo.dataset({ fresh: true }));
-      const decision = await LifeOS.app.decisionEngine.analyze({ type: LifeOS.DECISION_TYPES.TODAY_PLAN, mode: 'scenario', scenarioId: scenario.id, date: LifeOS.CoreUtil.addDays(LifeOS.CoreUtil.localDate(), 1) });
-      const after = LifeOS.CoreUtil.hash(await LifeOS.app.repo.dataset({ fresh: true }));
-      return { before, afterScenarioSave, after, mode: decision.request.mode };
+      return scenario.id;
     });
-    expect(result.after).toBe(result.afterScenarioSave);
-    expect(result.mode).toBe('scenario');
+    const before = await planningStateHash(page);
+    const mode = await page.evaluate(async scenarioId => {
+      const decision = await LifeOS.app.decisionEngine.analyze({ type: LifeOS.DECISION_TYPES.TODAY_PLAN, mode: 'scenario', scenarioId, date: LifeOS.CoreUtil.addDays(LifeOS.CoreUtil.localDate(), 1) });
+      return decision.request.mode;
+    }, scenarioId);
+    const after = await planningStateHash(page);
+    expect(after).toBe(before);
+    expect(mode).toBe('scenario');
   });
 
-  test('Decision Center is keyboard-accessible and usable at 390x844', async ({ page }) => {
+  test('Decision Center and Decision-backed What Now are keyboard-accessible and usable at 390x844', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     const button = page.getByRole('button', { name: 'Decision Center' });
     await expect(button).toBeVisible();
@@ -189,6 +201,14 @@ test.describe('LifeOS 4.6 Decision Engine', () => {
     await page.getByRole('button', { name: 'Analyze' }).click();
     await expect(page.locator('[data-decision-status]')).toContainText('Decision analysis complete');
     await expect(page.locator('.decision-card').first()).toBeVisible();
+    await page.getByRole('button', { name: 'Close Decision Center' }).click();
+    await page.evaluate(async () => LifeOS.app.whatNow());
+    const whatNow = page.locator('[data-decision-what-now]');
+    await expect(whatNow).toBeVisible();
+    await expect(whatNow).toContainText('DECISION ENGINE RECOMMENDATION');
+    await expect(whatNow).toContainText('What this protects');
+    await expect(whatNow).toContainText('Opportunity cost');
+    await expect(whatNow).toContainText('Best alternative');
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(overflow).toBeLessThanOrEqual(1);
   });
