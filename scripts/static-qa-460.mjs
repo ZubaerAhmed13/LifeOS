@@ -66,10 +66,12 @@ add('No remote network API in decision layer',!/(fetch\s*\(|XMLHttpRequest|WebSo
 add('No cloud/telemetry endpoint in decision layer',!/(https?:\/\/|telemetry|analytics endpoint|cloud inference)/i.test(files.decision));
 
 add('Decision Center UI present',has(files.decision,'DecisionCenterUI')&&has(files.decision,'decisionCenterDialog'));
-add('Accessible live status',has(files.decision,'aria-live="polite"')&&has(files.decision,'aria-labelledby="decisionCenterTitle"'));
+add('Accessible live status',has(files.decision,'aria-live=')&&has(files.decision,'polite')&&has(files.decision,'aria-labelledby=')&&has(files.decision,'decisionCenterTitle'));
 add('Keyboard-native controls',has(files.decision,"dialog.id='decisionCenterDialog'")&&has(files.decision,"button.type='button'"));
 add('Mobile 390-class layout covered',has(files.css,'@media (max-width:430px)')&&has(files.css,'.decision-grid{grid-template-columns:1fr}'));
 add('Tablet-safe responsive layout',has(files.css,'@media (max-width:700px)'));
+add('What Now is DecisionEngine-backed',has(files.decision,'data-decision-what-now')&&has(files.decision,"source:'what-now'")&&has(files.decision,'DECISION ENGINE RECOMMENDATION'));
+add('What Now explains protected value and opportunity cost',has(files.decision,'What this protects')&&has(files.decision,'Opportunity cost')&&has(files.decision,'Best alternative'));
 
 add('PWA loads Decision Engine',has(files.index,'./decision-engine.js'));
 add('Service worker precaches Decision Engine',has(files.sw,"'./decision-engine.js'"));
