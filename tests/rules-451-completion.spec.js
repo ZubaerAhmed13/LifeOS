@@ -129,25 +129,30 @@ test.describe('LifeOS 4.5.1 Final Automation Completion', () => {
 
   test('real active-project mutation produces project-weekly-shortfall through ProjectAllocator', async ({ page }) => {
     await installRule(page, { id: 'r451-shortfall-rule', name: 'Project shortfall producer', trigger: { type: 'project-weekly-shortfall', config: {} }, actions: [{ type: 'create-notification', params: { title: 'Project shortfall lifecycle fired' } }] });
-    await page.evaluate(async () => {
-      await LifeOS.app.service.saveProject({
-        title: 'R451 constrained project', status: 'Active', priority: 'High', planningMode: 'Weekly Flexible',
-        minimumWeeklyHours: 0, weeklyTargetHours: 20, stretchWeeklyHours: 24,
-        minimumSessionMinutes: 30, maximumSessionMinutes: 120,
-        workDayMaxHours: 0.25, offDayMaxHours: 0.25, universityDayMaxHours: 0.25, mixedDayMaxHours: 0.25, recoveryDayMaxHours: 0.25, customDayMaxHours: 0.25,
-        targetDate: '', preferredDayTypes: [], avoidDayTypes: []
-      });
+    const evidence = await page.evaluate(async () => {
+      const engine=LifeOS.app.ruleEngine,original=engine.emitDomainEvent,emittedShortfalls=[];
+      engine.emitDomainEvent=async function(type,options={}){
+        if(type==='project-weekly-shortfall')emittedShortfalls.push({eventId:options.eventId||'',entityId:options.entityId||'',shortfall:Number(options.data?.shortfall||0)});
+        return original.call(this,type,options);
+      };
+      try{
+        const project=await LifeOS.app.service.saveProject({
+          title: 'R451 constrained project', status: 'Active', priority: 'High', planningMode: 'Weekly Flexible',
+          minimumWeeklyHours: 0, weeklyTargetHours: 20, stretchWeeklyHours: 24,
+          minimumSessionMinutes: 30, maximumSessionMinutes: 120,
+          workDayMaxHours: 0.25, offDayMaxHours: 0.25, universityDayMaxHours: 0.25, mixedDayMaxHours: 0.25, recoveryDayMaxHours: 0.25, customDayMaxHours: 0.25,
+          targetDate: '', preferredDayTypes: [], avoidDayTypes: []
+        });
+        await engine.processing;
+        return {projectId:project.id,emittedShortfalls};
+      }finally{engine.emitDomainEvent=original;}
     });
     await waitForNotification(page, 'Project shortfall lifecycle fired');
-    await page.evaluate(() => LifeOS.app.ruleEngine.processing);
-    const evidence = await page.evaluate(async () => {
-      const project = (await LifeOS.app.repo.all('projects', { fresh: true })).find(row => row.title === 'R451 constrained project');
-      const runtime = await LifeOS.app.ruleEngine.runtime();
-      const eventId = project ? (runtime.recentEventIds || []).find(id => id.startsWith(`project-weekly-shortfall:${project.id}:`)) || '' : '';
-      return { projectId: project?.id || '', eventId };
-    });
+    const exact=evidence.emittedShortfalls.find(row=>row.entityId===evidence.projectId);
     expect(evidence.projectId).not.toBe('');
-    expect(evidence.eventId).toContain(`project-weekly-shortfall:${evidence.projectId}:`);
+    expect(exact).toBeTruthy();
+    expect(exact.eventId).toContain(`project-weekly-shortfall:${evidence.projectId}:`);
+    expect(exact.shortfall).toBeGreaterThan(0);
   });
 
   test('civil day lifecycle honors configured IANA timezone and DST edge semantics', async ({ page }) => {

@@ -53,3 +53,4 @@ app=replaceLine(app,/^    context\(event,data,settings\)\{.*$/m,civilContextMeth
 
 if(changed)fs.writeFileSync(path,source);
 console.log(changed?'Repaired LifeOS 4.5.1 patcher guards.':'LifeOS 4.5.1 patcher guards already repaired.');
+if(!process.env.LIFEOS_451_CORRECTION_CHILD){const {execFileSync}=await import('node:child_process');execFileSync(process.execPath,['scripts/apply-lifeos-451-final-corrections.mjs'],{stdio:'inherit',env:{...process.env,LIFEOS_451_CORRECTION_CHILD:'1'}})}

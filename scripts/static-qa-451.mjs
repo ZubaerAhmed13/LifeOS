@@ -55,6 +55,7 @@ add('index 4.5.1 identity',index.includes('LifeOS 4.5.1'));
 add('local CSP retained',index.includes("default-src 'self' data: blob:")&&index.includes("connect-src 'self'"));
 add('planning worker retained',worker.includes('LifeOSCompute'));
 add('closed-browser limitation retained',has('Rules run while LifeOS is active or at the next supported refresh'));
+add('explicit Undo/Redo automation suppression',has('async isExplicitHistoryReplay(stores)')&&has("['undo','redo'].includes(latest?.type)")&&has('if(await this.isExplicitHistoryReplay(stores))'));
 add('evidence cohort correction retained',has('comparison-specific eligible dated cohort')&&has('maximumStratumWeight'));
 
 try{new vm.Script(app,{filename:'app.js'});add('app.js parses',true)}catch{add('app.js parses',false)}
