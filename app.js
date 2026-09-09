@@ -1,8 +1,9 @@
 'use strict';
 
-  const APP_VERSION='4.5.1';
+  const APP_VERSION='4.6.0';
   const INTELLIGENCE_MODEL_VERSION='4.4.2';
   const RULE_ENGINE_VERSION='4.5.1';
+  const DECISION_ENGINE_VERSION='4.6.0';
   const RULE_SCHEMA_VERSION=1;
   const MAX_RULE_CHAIN_DEPTH=5;
   const RULE_HISTORY_LIMIT=250;
@@ -10,7 +11,7 @@
   const DB_SCHEMA_VERSION=16;
   const SCHEDULER_VERSION='4.1.0';
   const BACKUP_VERSION=2;
-  const BUILD_NAME='Professional Core · Final Automation Completion';
+  const BUILD_NAME='Professional Core · Decision Engine, Goal Alignment & Adaptive Planning';
   const DB_NAME='LifeOSDB';
 
   const STORE_DEFINITIONS={
@@ -294,8 +295,8 @@
   }
 
   class Repository{
-    constructor(database,bus){this.db=database;this.bus=bus;this.cache=new Map();this.dataCache={};this.dataCacheAt=0;this.validationLogger=null;this.crossTab=null}
-    invalidate(stores=[]){for(const store of stores){this.cache.delete(store);delete this.dataCache[store]}this.bus?.emit('data:changed',stores)}
+    constructor(database,bus){this.db=database;this.bus=bus;this.cache=new Map();this.dataCache={};this.dataCacheAt=0;this.dataCacheGeneration=0;this.validationLogger=null;this.crossTab=null}
+    invalidate(stores=[]){this.dataCacheGeneration+=1;for(const store of stores){this.cache.delete(store);delete this.dataCache[store]}this.bus?.emit('data:changed',stores)}
     async get(store,id){return this.db.get(store,id)}
     async all(store,{fresh=false}={}){if(!fresh&&this.cache.has(store))return CoreUtil.clone(this.cache.get(store));const rows=await this.db.all(store);this.cache.set(store,rows);return CoreUtil.clone(rows)}
     async byIndex(store,index,value){return this.db.transaction([store],'readonly',tx=>tx.index(store,index,value))}
@@ -306,7 +307,7 @@
     async transaction(stores,operation){const mutations=[];const result=await this.db.transaction(stores,'readwrite',async tx=>{const originalPut=tx.put.bind(tx),originalDelete=tx.delete.bind(tx),proxy={...tx,put:async(store,value)=>{const before=await tx.get(store,value.id);const result=await originalPut(store,value);mutations.push({store,id:value.id,revision:CoreUtil.num(value.revision),operation:before?'updated':'created'});return result},delete:async(store,id)=>{const before=await tx.get(store,id);const result=await originalDelete(store,id);if(before)mutations.push({store,id,revision:CoreUtil.num(before.revision)+1,operation:'deleted'});return result}};return operation(proxy)});this.invalidate(stores);if(this.crossTab&&mutations.length>100){for(const store of new Set(mutations.map(item=>item.store)))this.crossTab.broadcastStoreInvalidation(store)}else for(const mutation of mutations)this.crossTab?.broadcastMutation(mutation);return result}
     async settings(){return{...defaultSettings,...(await this.get('settings','settings')||{})}}
     async setting(key,value){if(arguments.length===1)return(await this.settings())[key];const current=await this.settings(),validated=DataValidator.settings({...current,[key]:value});return this.save('settings',validated)}
-    async dataset({fresh=false}={}){const names=['tasks','events','projects','goals','lifeAreas','habits','timeBlocks','focusSessions','dailyCheckins','dailyReviews','weeklyReviews','notes','milestones','habitLogs','rules','dayProfiles','dayTemplates','activityLog'];if(fresh)this.dataCache={};for(const name of names)if(!Object.hasOwn(this.dataCache,name)){let rows=await this.all(name,{fresh});if(['tasks','events','projects','dayTemplates','rules'].includes(name))rows=rows.map(record=>DataValidator.safe(name,record,this.validationLogger)).filter(Boolean);this.dataCache[name]=rows}this.dataCacheAt=Date.now();return CoreUtil.clone(this.dataCache)}
+    async dataset({fresh=false}={}){const names=['tasks','events','projects','goals','lifeAreas','habits','timeBlocks','focusSessions','dailyCheckins','dailyReviews','weeklyReviews','notes','milestones','habitLogs','rules','dayProfiles','dayTemplates','activityLog'];if(!fresh&&names.every(name=>Object.hasOwn(this.dataCache,name)))return CoreUtil.clone(this.dataCache);const generation=this.dataCacheGeneration,snapshot=await this.db.transaction(names,'readonly',async tx=>Object.fromEntries(await Promise.all(names.map(async name=>{let rows=await tx.all(name);if(['tasks','events','projects','dayTemplates','rules'].includes(name))rows=rows.map(record=>DataValidator.safe(name,record,this.validationLogger)).filter(Boolean);return[name,rows]}))));if(generation===this.dataCacheGeneration){this.dataCache=CoreUtil.clone(snapshot);this.dataCacheAt=Date.now();for(const name of names)this.cache.set(name,CoreUtil.clone(snapshot[name]))}return CoreUtil.clone(snapshot)/* DATASET-SNAPSHOT-TX-460 */}
     async log(type,text,meta={}){return this.save('activityLog',{type,text,meta,at:CoreUtil.nowISO()},{validate:false})}
   }
 
@@ -1948,5 +1949,5 @@
   }
 
   const lifeOS=new App();
-  globalThis.LifeOS={app:lifeOS,ruleEngineVersion:RULE_ENGINE_VERSION,RuleEngine,RULE_TRIGGERS,RULE_CONDITIONS,RULE_ACTIONS,RULE_TEMPLATES,RULE_TRIGGER_PRODUCERS,RULE_ACTION_EXECUTORS,RULE_PLANNING_PREFERENCES,version:APP_VERSION,schemaVersion:DB_SCHEMA_VERSION,schedulerVersion:SCHEDULER_VERSION,forecastModelVersion:FORECAST_MODEL_VERSION,calendarEngineVersion:CALENDAR_ENGINE_VERSION,intelligenceModelVersion:INTELLIGENCE_MODEL_VERSION,CoreUtil,TimeZoneEngine,CivilTimeEngine,CrossTabCoordinator,OperationLockManager,StorageHealthManager,ComputeManager,TimeInterval,IntervalSplitter,SleepEngine,EventTimeEngine,ConflictEngine,CapacityEngine,ScheduleStabilityEngine,ScheduleRepairEngine,FreezeManager,RecoveryTimeEngine,ContextSwitchEngine,PersonalPlanningModel,IntelligenceStatistics,IntelligenceConfidenceEngine,IntelligenceDatasetBuilder,PersonalBaselineEngine,PersonalIntelligenceEngine,DayScheduler,WeekScheduler,DeadlineEngine,ProjectForecastEngine,ForecastConfidenceEngine,SensitivityEngine,AssumptionInspector,MonteCarloEngine,ScenarioModificationValidator,ScenarioDataView,ScenarioDiffEngine,ScenarioApplyPlanner,ScenarioEngine,CalendarSnapEngine,CalendarOverlapEngine,CalendarInteractionPolicy,CalendarInteractionEngine,RecurrenceEngine,IntegrityEngine,SelfTestRunner};
+  globalThis.LifeOS={app:lifeOS,decisionEngineVersion:DECISION_ENGINE_VERSION,ruleEngineVersion:RULE_ENGINE_VERSION,RuleEngine,RULE_TRIGGERS,RULE_CONDITIONS,RULE_ACTIONS,RULE_TEMPLATES,RULE_TRIGGER_PRODUCERS,RULE_ACTION_EXECUTORS,RULE_PLANNING_PREFERENCES,version:APP_VERSION,schemaVersion:DB_SCHEMA_VERSION,schedulerVersion:SCHEDULER_VERSION,forecastModelVersion:FORECAST_MODEL_VERSION,calendarEngineVersion:CALENDAR_ENGINE_VERSION,intelligenceModelVersion:INTELLIGENCE_MODEL_VERSION,CoreUtil,TimeZoneEngine,CivilTimeEngine,CrossTabCoordinator,OperationLockManager,StorageHealthManager,ComputeManager,TimeInterval,IntervalSplitter,SleepEngine,EventTimeEngine,ConflictEngine,CapacityEngine,ScheduleStabilityEngine,ScheduleRepairEngine,FreezeManager,RecoveryTimeEngine,ContextSwitchEngine,PersonalPlanningModel,IntelligenceStatistics,IntelligenceConfidenceEngine,IntelligenceDatasetBuilder,PersonalBaselineEngine,PersonalIntelligenceEngine,DayScheduler,WeekScheduler,DeadlineEngine,ProjectForecastEngine,ForecastConfidenceEngine,SensitivityEngine,AssumptionInspector,MonteCarloEngine,ScenarioModificationValidator,ScenarioDataView,ScenarioDiffEngine,ScenarioApplyPlanner,ScenarioEngine,CalendarSnapEngine,CalendarOverlapEngine,CalendarInteractionPolicy,CalendarInteractionEngine,RecurrenceEngine,IntegrityEngine,SelfTestRunner};
   document.readyState==='loading'?document.addEventListener('DOMContentLoaded',()=>lifeOS.init()):lifeOS.init();

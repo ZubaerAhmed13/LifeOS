@@ -1,7 +1,7 @@
 {
-  "name": "LifeOS 4.5 — Rules, Automation & Planning Policies",
-  "short_name": "LifeOS 4.5",
-  "description": "A local-first personal operating system with transparent pattern learning, confidence-aware insights, adaptive planning, professional calendar workflows and offline-first data safety.",
+  "name": "LifeOS 4.6 — Decision Engine, Goal Alignment & Adaptive Planning",
+  "short_name": "LifeOS 4.6",
+  "description": "A local-first personal operating system with deterministic decision support, goal alignment, adaptive planning, transparent trade-offs, professional calendar workflows and offline-first data safety.",
   "id": "./",
   "start_url": "./index.html",
   "scope": "./",
