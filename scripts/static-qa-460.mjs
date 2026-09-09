@@ -66,7 +66,9 @@ add('No remote network API in decision layer',!/(fetch\s*\(|XMLHttpRequest|WebSo
 add('No cloud/telemetry endpoint in decision layer',!/(https?:\/\/|telemetry|analytics endpoint|cloud inference)/i.test(files.decision));
 
 add('Decision Center UI present',has(files.decision,'DecisionCenterUI')&&has(files.decision,'decisionCenterDialog'));
-add('Accessible live status',has(files.decision,'aria-live=')&&has(files.decision,'polite')&&has(files.decision,'aria-labelledby=')&&has(files.decision,'decisionCenterTitle'));
+const hasPoliteLiveRegion=(has(files.decision,'aria-live=')&&has(files.decision,'polite'))||has(files.decision,"setAttribute('aria-live','polite')");
+const hasDialogLabel=(has(files.decision,'aria-labelledby=')&&has(files.decision,'decisionCenterTitle'))||has(files.decision,"setAttribute('aria-labelledby','decisionCenterTitle')");
+add('Accessible live status',hasPoliteLiveRegion&&hasDialogLabel&&has(files.decision,'role="status"'));
 add('Keyboard-native controls',has(files.decision,"dialog.id='decisionCenterDialog'")&&has(files.decision,"button.type='button'"));
 add('Mobile 390-class layout covered',has(files.css,'@media (max-width:430px)')&&has(files.css,'.decision-grid{grid-template-columns:1fr}'));
 add('Tablet-safe responsive layout',has(files.css,'@media (max-width:700px)'));
