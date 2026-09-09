@@ -72,4 +72,35 @@ replace(
 
 fs.writeFileSync(file,source);
 for(const invariant of ['currentDate:civil.date||date','context.decisionDate>context.currentDate','DECISION-REVALIDATION-460','this.app.service.buildRepair','this.app.service.applyRepair','DECISION-COMMIT-VISIBILITY-460'])if(!source.includes(invariant))throw new Error(`LifeOS 4.6 apply-safety invariant missing: ${invariant}`);
-console.log('LifeOS 4.6 apply safety hardening applied and verified.');
+
+const appFile='app.js';
+let app=fs.readFileSync(appFile,'utf8');
+const replaceApp=(oldValue,newValue,marker,label)=>{
+  if(marker&&app.includes(marker))return;
+  const first=app.indexOf(oldValue);
+  if(first<0)throw new Error(`LifeOS 4.6 repository-snapshot guard failed: ${label} signature missing.`);
+  if(app.indexOf(oldValue,first+oldValue.length)>=0)throw new Error(`LifeOS 4.6 repository-snapshot guard failed: ${label} signature not unique.`);
+  app=app.replace(oldValue,newValue);
+};
+replaceApp(
+`    constructor(database,bus){this.db=database;this.bus=bus;this.cache=new Map();this.dataCache={};this.dataCacheAt=0;this.validationLogger=null;this.crossTab=null}`,
+`    constructor(database,bus){this.db=database;this.bus=bus;this.cache=new Map();this.dataCache={};this.dataCacheAt=0;this.dataCacheGeneration=0;this.validationLogger=null;this.crossTab=null}`,
+'dataCacheGeneration=0',
+'repository dataset generation counter'
+);
+replaceApp(
+`    invalidate(stores=[]){for(const store of stores){this.cache.delete(store);delete this.dataCache[store]}this.bus?.emit('data:changed',stores)}`,
+`    invalidate(stores=[]){this.dataCacheGeneration+=1;for(const store of stores){this.cache.delete(store);delete this.dataCache[store]}this.bus?.emit('data:changed',stores)}`,
+'this.dataCacheGeneration+=1',
+'repository invalidation generation advance'
+);
+replaceApp(
+`    async dataset({fresh=false}={}){const names=['tasks','events','projects','goals','lifeAreas','habits','timeBlocks','focusSessions','dailyCheckins','dailyReviews','weeklyReviews','notes','milestones','habitLogs','rules','dayProfiles','dayTemplates','activityLog'];if(fresh)this.dataCache={};for(const name of names)if(!Object.hasOwn(this.dataCache,name)){let rows=await this.all(name,{fresh});if(['tasks','events','projects','dayTemplates','rules'].includes(name))rows=rows.map(record=>DataValidator.safe(name,record,this.validationLogger)).filter(Boolean);this.dataCache[name]=rows}this.dataCacheAt=Date.now();return CoreUtil.clone(this.dataCache)}`,
+`    async dataset({fresh=false}={}){const names=['tasks','events','projects','goals','lifeAreas','habits','timeBlocks','focusSessions','dailyCheckins','dailyReviews','weeklyReviews','notes','milestones','habitLogs','rules','dayProfiles','dayTemplates','activityLog'];for(let attempt=0;attempt<3;attempt++){const generation=this.dataCacheGeneration,snapshot=fresh?{}:CoreUtil.clone(this.dataCache);for(const name of names)if(!Object.hasOwn(snapshot,name)){let rows=await this.all(name,{fresh});if(['tasks','events','projects','dayTemplates','rules'].includes(name))rows=rows.map(record=>DataValidator.safe(name,record,this.validationLogger)).filter(Boolean);snapshot[name]=rows}if(generation===this.dataCacheGeneration){this.dataCache=CoreUtil.clone(snapshot);this.dataCacheAt=Date.now();return CoreUtil.clone(snapshot)}fresh=true;await CoreUtil.yield()}throw CoreUtil.error('DATASET-CONCURRENT-460','Planning data changed repeatedly while LifeOS was building a coherent dataset snapshot. Please retry.',{generation:this.dataCacheGeneration})}`,
+'DATASET-CONCURRENT-460',
+'coherent repository dataset snapshot under concurrent invalidation'
+);
+fs.writeFileSync(appFile,app);
+for(const invariant of ['dataCacheGeneration=0','this.dataCacheGeneration+=1','DATASET-CONCURRENT-460'])if(!app.includes(invariant))throw new Error(`LifeOS 4.6 repository snapshot invariant missing: ${invariant}`);
+
+console.log('LifeOS 4.6 apply safety and coherent repository snapshot hardening applied and verified.');
