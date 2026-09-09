@@ -364,6 +364,12 @@ class DecisionApplyCoordinator{
       const entry=await this.app.journal?.begin('decision-apply',['timeBlocks'],'');
       try{
         const undoResult=await this.app.undo.execute(`Decision — ${choice.label||choice.candidate.title}`,[change],{activityType:'decision-apply',meta:{decisionId:decision.decisionId,decisionEngineVersion:DECISION_ENGINE_VERSION,alternativeId:choice.candidate.id}});
+        let persisted=null;
+        for(let attempt=0;attempt<3&&!persisted;attempt++){
+          persisted=await this.app.repo.get('timeBlocks',block.id);
+          if(!persisted&&attempt<2)await CoreUtil.yield();
+        }
+        if(!persisted){const error=CoreUtil.error('DECISION-COMMIT-VISIBILITY-460','The accepted decision did not become durably readable after its atomic commit.',{decisionId:decision.decisionId,alternativeId:choice.candidate.id,timeBlockId:block.id});throw error}
         if(entry)await this.app.journal.finish(entry,'committed');
         await this.app.bus?.emit?.('decision:applied',{decisionId:decision.decisionId,alternativeId:choice.candidate.id});
         return this.record(decision,choice,'Applied',{operationId:undoResult?.id||block.id});
