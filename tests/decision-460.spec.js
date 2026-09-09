@@ -144,11 +144,12 @@ test.describe('LifeOS 4.6 Decision Engine', () => {
     const task = await seedTask(page, { title: 'Atomic apply target', priority: 'Critical' });
     const decision = await makeApplicableDecision(page, task.id);
     const beforeHash = await planningStateHash(page);
-    const beforeBlocks = await page.evaluate(async () => (await LifeOS.app.repo.dataset({ fresh: true })).timeBlocks.length);
+    const beforeBlocks = await page.evaluate(async () => LifeOS.CoreUtil.array((await LifeOS.app.repo.dataset({ fresh: true })).timeBlocks).length);
     const applied = await page.evaluate(async decision => LifeOS.app.decisionEngine.apply(decision, decision.recommended.candidate.id), decision);
     const after = await page.evaluate(async decision => {
       const data = await LifeOS.app.repo.dataset({ fresh: true });
-      return { blocks: data.timeBlocks.length, created: data.timeBlocks.find(row => row.decisionId === decision.decisionId) };
+      const blocks = LifeOS.CoreUtil.array(data.timeBlocks);
+      return { blocks: blocks.length, created: blocks.find(row => row.decisionId === decision.decisionId) };
     }, decision);
     await page.evaluate(async () => LifeOS.app.undo.undo());
     const restoredHash = await planningStateHash(page);
