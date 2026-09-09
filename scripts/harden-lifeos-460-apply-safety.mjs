@@ -55,7 +55,21 @@ replace(
 "this.app.service.buildRepair(fresh.context.decisionDate",
 'delegate repair apply to authoritative DomainService repair transaction'
 );
+replace(
+`        const undoResult=await this.app.undo.execute(\`Decision — \${choice.label||choice.candidate.title}\`,[change],{activityType:'decision-apply',meta:{decisionId:decision.decisionId,decisionEngineVersion:DECISION_ENGINE_VERSION,alternativeId:choice.candidate.id}});
+        if(entry)await this.app.journal.finish(entry,'committed');`,
+`        const undoResult=await this.app.undo.execute(\`Decision — \${choice.label||choice.candidate.title}\`,[change],{activityType:'decision-apply',meta:{decisionId:decision.decisionId,decisionEngineVersion:DECISION_ENGINE_VERSION,alternativeId:choice.candidate.id}});
+        let persisted=null;
+        for(let attempt=0;attempt<3&&!persisted;attempt++){
+          persisted=await this.app.repo.get('timeBlocks',block.id);
+          if(!persisted&&attempt<2)await CoreUtil.yield();
+        }
+        if(!persisted){const error=CoreUtil.error('DECISION-COMMIT-VISIBILITY-460','The accepted decision did not become durably readable after its atomic commit.',{decisionId:decision.decisionId,alternativeId:choice.candidate.id,timeBlockId:block.id});throw error}
+        if(entry)await this.app.journal.finish(entry,'committed');`,
+"DECISION-COMMIT-VISIBILITY-460",
+'cross-browser post-commit durability verification'
+);
 
 fs.writeFileSync(file,source);
-for(const invariant of ['currentDate:civil.date||date','context.decisionDate>context.currentDate','DECISION-REVALIDATION-460','this.app.service.buildRepair','this.app.service.applyRepair'])if(!source.includes(invariant))throw new Error(`LifeOS 4.6 apply-safety invariant missing: ${invariant}`);
+for(const invariant of ['currentDate:civil.date||date','context.decisionDate>context.currentDate','DECISION-REVALIDATION-460','this.app.service.buildRepair','this.app.service.applyRepair','DECISION-COMMIT-VISIBILITY-460'])if(!source.includes(invariant))throw new Error(`LifeOS 4.6 apply-safety invariant missing: ${invariant}`);
 console.log('LifeOS 4.6 apply safety hardening applied and verified.');
