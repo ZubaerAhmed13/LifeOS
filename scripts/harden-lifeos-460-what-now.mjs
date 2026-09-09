@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 
+// Preserve retained 4.4 What Now evidence/status semantics while routing recommendations through DecisionEngine.
 const file='decision-engine.js';
 let source=fs.readFileSync(file,'utf8');
 const marker='data-decision-what-now';
