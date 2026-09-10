@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 
+// Exact-SHA certification retrigger after deterministic retained RuleEngine fixture repair.
 const read=file=>fs.readFileSync(file,'utf8');
 const files={app:read('app.js'),decision:read('decision-engine.js'),css:read('app.css'),index:read('index.html'),sw:read('service-worker.js'),manifest:read('manifest.webmanifest'),test:read('tests/decision-462-master-spec.spec.js')};
 const checks=[];
