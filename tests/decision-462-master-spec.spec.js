@@ -44,9 +44,9 @@ test.describe('LifeOS 4.6.2 Master-Spec Certification Completion',()=>{
       const report=await new LifeOS.SelfTestRunner(LifeOS.app.repo).run();
       const names=['Decision Context','Decision Fingerprint','Decision Candidate Generation','Decision Feasibility','Decision Trade-offs','Decision Ranking','Decision Preview','Decision Atomicity','Decision Concurrency','Decision Scenario','Decision Data Quality','Decision Privacy','Decision Brief','Decision Outcome'];
       const groups=Object.fromEntries(names.map(name=>[name,report.groups[name]||null]));
-      console.log(`LIFEOS_DECISION_GROUPS ${JSON.stringify(groups)}`);
       return{version:report.decisionEngineVersion,total:report.total,groups,failed:report.results.filter(x=>names.includes(x.group)&&!x.pass).map(x=>`${x.group}: ${x.name} — ${x.error||'failed'}`)};
     });
+    console.log(`LIFEOS_DECISION_GROUPS ${JSON.stringify(result.groups)}`);
     expect(result.version).toBe('4.6.2');expect(result.total).toBeGreaterThan(492);expect(result.failed).toEqual([]);
     for(const [name,group] of Object.entries(result.groups)){expect(group,`${name} missing`).not.toBeNull();expect(group.total,`${name} empty`).toBeGreaterThan(0);expect(group.passed,`${name} not green`).toBe(group.total)}
   });
