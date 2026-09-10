@@ -27,6 +27,51 @@ const newForecastPrefix="forecastEffect(before,after,context,candidate){const {C
 decision=replace(decision,oldForecastPrefix,newForecastPrefix,'affected-only deadline forecast delta');
 decision=replace(decision,'forecastEffect=this.forecastEffect(context.data,sim,context),','forecastEffect=this.forecastEffect(context.data,sim,context,candidate),','forecast call candidate scoping');
 
+const oldAllocator="try{const allocation=ProjectAllocator.dailyAllowance(task,block.date,sim,context.settings,ProjectAllocator.context(sim,context.settings));if(duration>num(allocation.minutes)){blockers.push(`Project/capacity allowance is ${Math.max(0,num(allocation.minutes))}m but candidate needs ${duration}m.`);evidence.push(reason('PROJECT-ALLOWANCE','ProjectAllocator','minutes',allocation.minutes,`needs ${duration}m`,'hard'))}}catch(error){blockers.push(`ProjectAllocator validation failed closed: ${error.message}`)}";
+const newAllocator="try{const allocation=ProjectAllocator.dailyAllowance(task,block.date,sim,context.settings,ProjectAllocator.context(sim,context.settings));if(task.projectId&&!allocation.project){blockers.push(`ProjectAllocator could not resolve project ${task.projectId}; feasibility failed closed.`);evidence.push(reason('PROJECT-ALLOCATOR-BINDING','ProjectAllocator','projectResolved',false,'Fail closed','hard'))}else{const dailyRemaining=Number.isFinite(Number(allocation.dailyMax))?Math.max(0,num(allocation.dailyMax)-num(allocation.dailyUsed)):Infinity,weeklyRemaining=Number.isFinite(Number(allocation.weeklyMax))?Math.max(0,num(allocation.weeklyMax)-num(allocation.weeklyUsed)):Infinity,authoritativeAllowance=Math.max(0,Math.min(num(allocation.minutes),dailyRemaining,weeklyRemaining));if(duration>authoritativeAllowance){blockers.push(`Project/capacity allowance is ${authoritativeAllowance}m but candidate needs ${duration}m.`);evidence.push(reason('PROJECT-ALLOWANCE','ProjectAllocator','minutes',authoritativeAllowance,`needs ${duration}m`,'hard'))}}}catch(error){blockers.push(`ProjectAllocator validation failed closed: ${error.message}`)}";
+decision=replace(decision,oldAllocator,newAllocator,'fail-closed ProjectAllocator daily and weekly bounds');
+
+const oldAlternatives=`class DecisionAlternativeGenerator{
+  generate(ranked,context){
+    if(!ranked.length)return[];
+    const selected=[],seen=new Set();
+    const add=(row,label)=>{if(row&&!seen.has(row.candidate.id)&&selected.length<MAX_ALTERNATIVES){seen.add(row.candidate.id);selected.push({...row,label})}};
+    add(ranked[0],'Recommended');
+    const byDeadline=[...ranked].sort((a,b)=>b.tradeoffs.deadlineProtection-a.tradeoffs.deadlineProtection||a.tradeoffs.disruption-b.tradeoffs.disruption);
+    add(byDeadline[0],'Deadline-first');
+    const balanced=[...ranked].sort((a,b)=>{
+      const av=(a.tradeoffs.deadlineProtection+a.tradeoffs.projectAlignment+a.tradeoffs.capacityFit+a.tradeoffs.bufferImpact)/4;
+      const bv=(b.tradeoffs.deadlineProtection+b.tradeoffs.projectAlignment+b.tradeoffs.capacityFit+b.tradeoffs.bufferImpact)/4;
+      return bv-av;
+    });
+    add(balanced[0],'Balanced');
+    add([...ranked].sort((a,b)=>a.tradeoffs.disruption-b.tradeoffs.disruption||a.tradeoffs.contextCost-b.tradeoffs.contextCost)[0],'Lower-disruption');
+    add(ranked.find(r=>r.candidate.kind===KEEP_CURRENT_PLAN),'Keep current plan');
+    return selected;
+  }
+}`;
+const newAlternatives=`class DecisionAlternativeGenerator{
+  generate(ranked,context){
+    if(!ranked.length)return[];
+    const selected=[],seen=new Set(),keep=ranked.find(r=>r.candidate.kind===KEEP_CURRENT_PLAN),bestChange=ranked.find(r=>r.candidate.kind!==KEEP_CURRENT_PLAN),nonKeepLimit=Math.max(1,MAX_ALTERNATIVES-(keep?1:0));
+    const add=(row,label,{reserveKeep=true}={})=>{const limit=reserveKeep&&keep&&!seen.has(keep.candidate.id)?nonKeepLimit:MAX_ALTERNATIVES;if(row&&!seen.has(row.candidate.id)&&selected.length<limit){seen.add(row.candidate.id);selected.push({...row,label})}};
+    add(ranked[0],'Recommended');
+    add(bestChange,'Best feasible change');
+    const byDeadline=[...ranked].sort((a,b)=>b.tradeoffs.deadlineProtection-a.tradeoffs.deadlineProtection||a.tradeoffs.disruption-b.tradeoffs.disruption);
+    add(byDeadline.find(r=>r.candidate.kind!==KEEP_CURRENT_PLAN)||byDeadline[0],'Deadline-first');
+    const balanced=[...ranked].sort((a,b)=>{
+      const av=(a.tradeoffs.deadlineProtection+a.tradeoffs.projectAlignment+a.tradeoffs.capacityFit+a.tradeoffs.bufferImpact)/4;
+      const bv=(b.tradeoffs.deadlineProtection+b.tradeoffs.projectAlignment+b.tradeoffs.capacityFit+b.tradeoffs.bufferImpact)/4;
+      return bv-av;
+    });
+    add(balanced.find(r=>r.candidate.kind!==KEEP_CURRENT_PLAN)||balanced[0],'Balanced');
+    add([...ranked].filter(r=>r.candidate.kind!==KEEP_CURRENT_PLAN).sort((a,b)=>a.tradeoffs.disruption-b.tradeoffs.disruption||a.tradeoffs.contextCost-b.tradeoffs.contextCost)[0],'Lower-disruption');
+    if(keep&&!seen.has(keep.candidate.id)&&selected.length<MAX_ALTERNATIVES){seen.add(keep.candidate.id);selected.push({...keep,label:'Keep current plan'})}
+    return selected.slice(0,MAX_ALTERNATIVES);
+  }
+}`;
+decision=replace(decision,oldAlternatives,newAlternatives,'always expose best feasible change and Keep Current Plan');
+
 fs.writeFileSync('decision-engine.js',decision);
 
 let test=fs.readFileSync('tests/decision-461-completion.spec.js','utf8');
@@ -39,5 +84,5 @@ test=replace(test,"title:'Fixed event',startDate:date,endDate:date,startTime:'10
 fs.writeFileSync('tests/decision-461-completion.spec.js',test);
 
 const hardened=fs.readFileSync('decision-engine.js','utf8');
-for(const marker of ['deferralReady=requestedIds.size','base=context.data,sim={...base','deadlineTasks=array(before.tasks)','this.forecastEffect(context.data,sim,context,candidate)'])if(!hardened.includes(marker))throw new Error(`Missing production hardening marker: ${marker}`);
-console.log('LifeOS 4.6.1 targeted planning and bounded tradeoff hardening applied and verified.');
+for(const marker of ['deferralReady=requestedIds.size','base=context.data,sim={...base','deadlineTasks=array(before.tasks)','this.forecastEffect(context.data,sim,context,candidate)','PROJECT-ALLOCATOR-BINDING','Best feasible change'])if(!hardened.includes(marker))throw new Error(`Missing production hardening marker: ${marker}`);
+console.log('LifeOS 4.6.1 targeted planning, actionable alternatives, allocator bounds and bounded tradeoff hardening applied and verified.');
