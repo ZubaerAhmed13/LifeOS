@@ -15,7 +15,7 @@ add('Preview model CURRENT vs PROPOSED',has(files.decision,'current:{','proposed
 add('Preview UI CURRENT vs PROPOSED',has(files.decision,'data-preview-current','>CURRENT<','data-preview-proposed','>PROPOSED<'));
 add('Preview forecast panel',has(files.decision,'data-preview-forecast','Forecast effect','Risk points','Deadline shortfall'));
 add('Preview opportunity panel',has(files.decision,'data-preview-opportunity','Opportunity cost','Capacity committed','Competing work uncovered'));
-add('Keyboard alternative selection control',has(files.decision,'data-decision-choice','type="radio" name="decision-alternative"'));
+add('Keyboard alternative selection control',has(files.decision,'data-decision-choice','type="radio" name="decision-alternative"','aria-keyshortcuts','Control+Alt+D'));
 add('In-Decision-Center Undo',has(files.decision,'data-decision-undo','Undo Decision','Decision undone. The production state was restored.'));
 add('Decision queued lock retained',has(files.decision,'withQueuedExclusiveLock','Decision apply'));
 add('Decision in-lock freshness and feasibility revalidation retained',has(files.decision,'lockedFresh=await this.revalidate(decision)','lockedFeasibility=new DecisionFeasibilityGate().evaluate'));
@@ -26,10 +26,10 @@ add('Decision outcome follow-up persistence',has(files.decision,'class DecisionO
 add('Applied decisions create follow-up',has(files.decision,'this.outcomes.create(decision,choice',"status==='Applied'&&!extra.noChange"));
 add('P1 engines exported',has(files.decision,'DecisionOutcomeEngine,DecisionBriefEngine,DecisionSelfTestExtension','api.app.decisionOutcome=engine.outcomes','api.app.decisionBrief=engine.briefs'));
 add('New browser suite has two-tab Decision Apply',has(files.test,'two tabs applying the same Decision create exactly one logical mutation','Promise.all([apply(page),apply(second)])'));
-add('New browser suite has keyboard-only flow',has(files.test,'keyboard only chooses alternative then Preview → Apply → Undo',"page.keyboard.press('Tab')","page.keyboard.press('Enter')"));
+add('New browser suite has keyboard-only flow',has(files.test,'keyboard only chooses a different alternative then Preview → Apply → Undo',"page.keyboard.press('Control+Alt+D')","page.keyboard.press('ArrowDown')","page.keyboard.press('Enter')")&&!files.test.includes("page.keyboard.press('Tab')"));
 add('New browser suite has offline full flow',has(files.test,'offline Analyze → Preview → Apply → Undo remains fully local','context.setOffline(true)','Undo Decision'));
 add('New browser suite has Preview UI gate',has(files.test,'Preview UI shows explicit CURRENT vs PROPOSED plus forecast and opportunity panels','data-preview-current','data-preview-proposed'));
-add('New browser suite has Morning/EOD/outcome gates',has(files.test,'Morning Decision Brief is structured','End-of-Day Decision Review exposes pending outcome'));
+add('New browser suite has Morning/EOD/outcome gates',has(files.test,'Morning Decision Brief is structured','End-of-Day Decision Review exposes pending outcome','Decision outcome recorded: Worked.'));
 add('4.6.2 service worker identity',has(files.sw,"const APP_VERSION = '4.6.2';"));
 add('4.6.2 manifest identity',has(files.manifest,'LifeOS 4.6.2'));
 add('4.6.2 document title',has(files.index,'LifeOS 4.6.2'));
