@@ -1,0 +1,49 @@
+name: LifeOS 4.6.1 Apply Completion Hardening
+
+on:
+  push:
+    branches:
+      - feature/lifeos-461-decision-planning-completion
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: lifeos-461-apply-hardening
+  cancel-in-progress: true
+
+jobs:
+  harden:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply guarded 4.6.1 completion hardening
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check scripts/upgrade-lifeos-461-decision-planning.mjs
+          node --check scripts/harden-lifeos-461-completion.mjs
+          node scripts/upgrade-lifeos-461-decision-planning.mjs
+          node scripts/harden-lifeos-461-completion.mjs
+          node --check decision-engine.js
+          node --check tests/decision-461-completion.spec.js
+          node scripts/static-qa-461.mjs
+      - name: Commit materialized source and deterministic tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- decision-engine.js tests/decision-461-completion.spec.js; then
+            echo 'Hardening already materialized.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add decision-engine.js tests/decision-461-completion.spec.js
+          git commit -m 'fix(4.6.1): materialize bounded decision hardening and QA fixtures'
+          git push origin HEAD:${GITHUB_REF_NAME}
