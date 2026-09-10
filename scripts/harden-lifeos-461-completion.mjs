@@ -78,6 +78,7 @@ let test=fs.readFileSync('tests/decision-461-completion.spec.js','utf8');
 test=replace(test,"d=await LifeOS.app.decisionEngine.analyze({type:LifeOS.DECISION_TYPES.DEFERRAL,date,mode:'production'}),p=","d=await LifeOS.app.decisionEngine.analyze({type:LifeOS.DECISION_TYPES.DEFERRAL,date,mode:'production',entityIds:[taskId]}),p=",'DEFERRAL targeted certification request');
 test=replace(test,'expect(result.score).toBeLessThan(100)','expect(Number.isFinite(result.score)).toBeTruthy();expect(result.score).toBeGreaterThanOrEqual(0);expect(result.score).toBeLessThanOrEqual(100)','ScheduleStabilityEngine score contract');
 test=replace(test,'workDayMaxHours:0,offDayMaxHours:0,universityDayMaxHours:0,mixedDayMaxHours:0,recoveryDayMaxHours:0,customDayMaxHours:0','workDayMaxHours:.25,offDayMaxHours:.25,universityDayMaxHours:.25,mixedDayMaxHours:.25,recoveryDayMaxHours:.25,customDayMaxHours:.25','ProjectAllocator non-zero hard cap fixture');
+test=replace(test,'customDayMaxHours:.25,weeklyTargetHours:1,stretchWeeklyHours:1','customDayMaxHours:.25,minimumWeeklyHours:0,weeklyTargetHours:1,stretchWeeklyHours:1','ProjectAllocator valid weekly budget fixture');
 test=replace(test,"title:'Conflict task',status:'Scheduled',priority:'High',estimatedDuration:60,plannedMinutes:60","title:'Conflict task',status:'Scheduled',priority:'High',estimatedDuration:90,plannedMinutes:90,minimumSessionDuration:90,maximumSessionDuration:90",'repairable conflict task fixture');
 test=replace(test,"date,startTime:'10:00',endTime:'11:00',duration:60,type:'task'","date,startTime:'15:30',endTime:'17:00',duration:90,type:'task'",'repairable conflict block fixture');
 test=replace(test,"title:'Fixed event',startDate:date,endDate:date,startTime:'10:15',endTime:'10:45',fixedOrFlexible:'Fixed'","title:'Fixed event',kind:'Meeting',startDate:date,endDate:date,startTime:'14:00',endTime:'16:20',fixedOrFlexible:'Fixed'",'repairable fixed event fixture');
@@ -85,4 +86,6 @@ fs.writeFileSync('tests/decision-461-completion.spec.js',test);
 
 const hardened=fs.readFileSync('decision-engine.js','utf8');
 for(const marker of ['deferralReady=requestedIds.size','base=context.data,sim={...base','deadlineTasks=array(before.tasks)','this.forecastEffect(context.data,sim,context,candidate)','PROJECT-ALLOCATOR-BINDING','Best feasible change'])if(!hardened.includes(marker))throw new Error(`Missing production hardening marker: ${marker}`);
+const hardenedTest=fs.readFileSync('tests/decision-461-completion.spec.js','utf8');
+if(!hardenedTest.includes('customDayMaxHours:.25,minimumWeeklyHours:0,weeklyTargetHours:1'))throw new Error('ProjectAllocator certification fixture is not a valid project budget.');
 console.log('LifeOS 4.6.1 targeted planning, actionable alternatives, allocator bounds and bounded tradeoff hardening applied and verified.');
