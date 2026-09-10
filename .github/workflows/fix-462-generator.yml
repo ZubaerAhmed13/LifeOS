@@ -1,0 +1,37 @@
+name: Fix 4.6.2 generator interpolation
+on:
+  push:
+    branches:
+      - feature/lifeos-462-master-spec-certification
+permissions:
+  contents: write
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/lifeos-462-master-spec-certification
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Replace nested generator template with inert encoded source
+        run: |
+          node <<'NODE'
+          const fs=require('fs'),path='scripts/upgrade-lifeos-462-master-spec.mjs';let s=fs.readFileSync(path,'utf8');
+          const start=s.indexOf('const recordReplacement=`'),end=s.indexOf(';\ndecision=replaceSpan(decision,recordStart,recordEnd,recordReplacement);',start);
+          if(start<0||end<0)throw new Error('generator recordReplacement span not found');
+          const fixed="const recordReplacement=decode('ICBhc3luYyByZWNvcmQoZGVjaXNpb24sY2hvaWNlLHN0YXR1cyxleHRyYT17fSl7Y29uc3QgYWZmZWN0ZWQ9Wy4uLm5ldyBTZXQoWy4uLihjaG9pY2UuY2FuZGlkYXRlLmFmZmVjdGVkRW50aXR5SWRzfHxbXSksY2hvaWNlLmNhbmRpZGF0ZS50YXNrSWQsY2hvaWNlLmNhbmRpZGF0ZS5wcm9qZWN0SWRdLmZpbHRlcihCb29sZWFuKSldLHJlY29yZD17aWQ6YGRlY2lzaW9uLWhpc3Rvcnk6JHtkZWNpc2lvbi5kZWNpc2lvbklkfToke0RhdGUubm93KCl9YCxkZWNpc2lvbklkOmRlY2lzaW9uLmRlY2lzaW9uSWQsdHlwZTpkZWNpc2lvbi5yZXF1ZXN0LnR5cGUsc2VsZWN0ZWRBbHRlcm5hdGl2ZTpjaG9pY2UuY2FuZGlkYXRlLmlkLHN0YXR1cyxyZWFzb25zOmNob2ljZS50cmFkZW9mZnMucmVhc29ucyxhZmZlY3RlZEVudGl0eUlkczphZmZlY3RlZCxvcGVyYXRpb25JZDpleHRyYS5vcGVyYXRpb25JZHx8JycsZ2VuZXJhdGVkQXQ6ZGVjaXNpb24uZ2VuZXJhdGVkQXQsYXBwbGllZEF0OnN0YXR1cz09PSdBcHBsaWVkJz9ub3dJU08oKTonJyxjYW5kaWRhdGVUaXRsZTpjaG9pY2UuY2FuZGlkYXRlLnRpdGxlfHwnJyxkZWNpc2lvbkVuZ2luZVZlcnNpb246REVDSVNJT05fRU5HSU5FX1ZFUlNJT059O3RyeXthd2FpdCB0aGlzLmFwcC5yZXBvLnNhdmUoJ2FjdGl2aXR5TG9nJyx7Li4ucmVjb3JkLHR5cGU6J2RlY2lzaW9uLWhpc3RvcnknLHRleHQ6YCR7c3RhdHVzfTogJHtjaG9pY2UuY2FuZGlkYXRlLnRpdGxlfWAsYXQ6bm93SVNPKCksY3JlYXRlZEF0Om5vd0lTTygpLHVwZGF0ZWRBdDpub3dJU08oKX0se3ZhbGlkYXRlOmZhbHNlfSl9Y2F0Y2h7fWlmKHN0YXR1cz09PSdBcHBsaWVkJyYmIWV4dHJhLm5vQ2hhbmdlJiZ0aGlzLm91dGNvbWVzKXRyeXthd2FpdCB0aGlzLm91dGNvbWVzLmNyZWF0ZShkZWNpc2lvbixjaG9pY2UsZXh0cmEub3BlcmF0aW9uSWR8fCcnKX1jYXRjaHt9cmV0dXJue3JlY29yZCwuLi5leHRyYX19Cn0=');";
+          s=s.slice(0,start)+fixed+s.slice(end+1);fs.writeFileSync(path,s);
+          NODE
+          node --check scripts/upgrade-lifeos-462-master-spec.mjs
+          git diff --check
+      - name: Commit repaired generator
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add scripts/upgrade-lifeos-462-master-spec.mjs
+          git commit -m 'fix(4.6.2): make generator record source interpolation-safe'
+          git push origin HEAD:feature/lifeos-462-master-spec-certification
