@@ -280,7 +280,112 @@ class DecisionHistory{
   }
 }
 
-class DecisionOutcomeEngine{\n  constructor(app=host().app){this.app=app}\n  async create(decision,choice,operationId=''){\n    if(!decision?.decisionId||!choice?.candidate?.id)return null;\n    const {CoreUtil}=host(),id=`decision-outcome:${decision.decisionId}`,existing=await this.app.repo.get('activityLog',id);\n    if(existing)return existing;\n    const at=nowISO(),decisionDate=decision.request?.date||CoreUtil.localDate(),record={\n      id,type:'decision-outcome',text:`Decision follow-up: ${choice.candidate.title||choice.candidate.id}`,\n      decisionId:decision.decisionId,alternativeId:choice.candidate.id,operationId,status:'Pending',outcome:'',notes:'',\n      decisionDate,followUpDate:CoreUtil.addDays(decisionDate,1),appliedAt:at,recordedAt:'',at,createdAt:at,updatedAt:at,\n      decisionEngineVersion:DECISION_ENGINE_VERSION\n    };\n    await this.app.repo.save('activityLog',record,{validate:false});return record;\n  }\n  async list(limit=100){const rows=await this.app.repo.all('activityLog,{fresh:true});return rows.filter(x=>x.type==='decision-outcome').sort((a,b)=>String(b.at||'').localeCompare(String(a.at||''))).slice(0,limit)}\n  async pending(limit=20){return (await this.list(200)).filter(x=>x.status==='Pending').slice(0,limit)}\n  async record(decisionId,outcome,notes=''){\n    const allowed=new Set(['Worked','Partly','Did not work','Undone']);\n    if(!allowed.has(outcome))throw new Error('Decision outcome must be Worked, Partly, Did not work, or Undone.');\n    const id=`decision-outcome:0L@��!6? ����IC?D�L�� /��504@�B���? ԄE2
+class DecisionOutcomeEngine{
+  constructor(app=host().app){this.app=app}
+  async create(decision,choice,operationId=''){
+    if(!decision?.decisionId||!choice?.candidate?.id)return null;
+    const {CoreUtil}=host(),id=`decision-outcome:${decision.decisionId}`,existing=await this.app.repo.get('activityLog',id);
+    if(existing)return existing;
+    const at=nowISO(),decisionDate=decision.request?.date||CoreUtil.localDate(),record={
+      id,type:'decision-outcome',text:`Decision follow-up: ${choice.candidate.title||choice.candidate.id}`,
+      decisionId:decision.decisionId,alternativeId:choice.candidate.id,operationId,status:'Pending',outcome:'',notes:'',
+      decisionDate,followUpDate:CoreUtil.addDays(decisionDate,1),appliedAt:at,recordedAt:'',at,createdAt:at,updatedAt:at,
+      decisionEngineVersion:DECISION_ENGINE_VERSION
+    };
+    await this.app.repo.save('activityLog',record,{validate:false});
+    return record;
+  }
+  async list(limit=100){
+    const rows=await this.app.repo.all('activityLog',{fresh:true});
+    return rows.filter(x=>x.type==='decision-outcome').sort((a,b)=>String(b.at||'').localeCompare(String(a.at||''))).slice(0,limit);
+  }
+  async pending(limit=20){return (await this.list(200)).filter(x=>x.status==='Pending').slice(0,limit)}
+  async record(decisionId,outcome,notes=''){
+    const allowed=new Set(['Worked','Partly','Did not work','Undone']);
+    if(!allowed.has(outcome))throw new Error('Decision outcome must be Worked, Partly, Did not work, or Undone.');
+    const id=`decision-outcome:${decisionId}`,current=await this.app.repo.get('activityLog',id);
+    if(!current)throw new Error('Decision follow-up record was not found.');
+    const at=nowISO(),next={...current,status:'Recorded',outcome,notes:String(notes||''),recordedAt:at,updatedAt:at,at};
+    await this.app.repo.save('activityLog',next,{validate:false});
+    return next;
+  }
+}
+
+class DecisionBriefEngine{
+  constructor(engine,app=host().app,outcomes=null){this.engine=engine;this.app=app;this.outcomes=outcomes||new DecisionOutcomeEngine(app)}
+  async morning(date=host().CoreUtil.localDate()){
+    const {CoreUtil,CapacityEngine}=host(),[data,settings]=await Promise.all([this.app.repo.dataset({fresh:true}),this.app.repo.settings()]);
+    let capacity=null;try{capacity=CapacityEngine.summary(date,data,settings)}catch{}
+    const todayRecommendation=await this.engine.analyze({type:DECISION_TYPES.TODAY_PLAN,date,mode:'preview',source:'morning-decision-brief'});
+    const deadlineRecommendation=await this.engine.analyze({type:DECISION_TYPES.DEADLINE_TRIAGE,date,mode:'preview',source:'morning-decision-brief',constraints:{horizonDays:3}});
+    const active=array(data.tasks).filter(activeTask),due=active.filter(task=>task.deadline&&task.deadline<=CoreUtil.addDays(date,3));
+    return{
+      kind:'morning-decision-brief',date,generatedAt:nowISO(),localOnly:true,
+      capacity:capacity?{focusRemaining:num(capacity.focusRemaining),physicalLeft:num(capacity.physicalLeft),status:capacity.status||''}:null,
+      dueCount:due.length,
+      todayRecommendation,
+      deadlineRecommendation,
+      summary:{
+        today:todayRecommendation.recommended?.explanation?.summary||'No feasible day-plan change is currently recommended.',
+        deadlines:deadlineRecommendation.recommended?.explanation?.summary||'No deadline-triage change is currently recommended.'
+      }
+    };
+  }
+  async endOfDay(date=host().CoreUtil.localDate()){
+    const [history,pending]=await Promise.all([new DecisionHistory(this.app).list(200),this.outcomes.pending(100)]);
+    const applied=history.filter(row=>row.status==='Applied'&&String(row.appliedAt||row.at||'').slice(0,10)===date);
+    const duePending=pending.filter(row=>!row.followUpDate||row.followUpDate<=host().CoreUtil.addDays(date,1));
+    return{
+      kind:'end-of-day-decision-review',date,generatedAt:nowISO(),localOnly:true,
+      appliedCount:applied.length,
+      applied,
+      pendingOutcomes:duePending,
+      summary:applied.length?`${applied.length} decision${applied.length===1?' was':'s were'} applied today; ${duePending.length} outcome follow-up${duePending.length===1?' is':'s are'} pending.`:`No Decision Engine mutation was applied on ${date}; ${duePending.length} outcome follow-up${duePending.length===1?' is':'s are'} pending.`
+    };
+  }
+}
+
+class DecisionSelfTestExtension{
+  static fixture(runner){
+    const {CoreUtil}=host(),sample=runner.sampleData(),date='2031-01-15',task={...sample.task,id:'decision-self-task',title:'Decision self task',status:'Next',priority:'High',estimatedDuration:60,remainingDuration:60,actualMinutes:0,plannedMinutes:0,minimumSessionDuration:15,maximumSessionDuration:60,blockedBy:[],deadline:'2031-01-17',revision:1},data={...clone(sample.data),tasks:[task],events:[],timeBlocks:[],rules:[],projects:[{...sample.project,id:'p1',status:'Active',revision:1}],dayProfiles:[]},settings={...sample.settings,dayStart:'07:00',dayEnd:'23:00',recoveryMode:'preferred',revision:1},quality={completeness:1,missingInputs:[],unavailableSignals:[],warnings:[]};
+    return{sample,date,task,data,settings,context:Object.freeze({generatedAt:'2031-01-15T00:00:00.000Z',decisionDate:date,currentDate:'2031-01-14',currentLocalTime:'09:00',timeZoneId:'Europe/Berlin',mode:'production',data:clone(data),settings:clone(settings),tasks:[clone(task)],readyTasks:[clone(task)],blockedTasks:[],projects:clone(data.projects),events:[],timeBlocks:[],capacity:{focusRemaining:480,physicalLeft:720,status:'Available'},deadlineForecasts:[],projectForecasts:[],projectShortfalls:[],activeRules:[],intelligence:{insights:[]},contextFingerprint:CoreUtil.hash({date,task}),dataGeneration:2,sourceRevisions:{settings:1,scenario:0,tasks:{[task.id]:1},projects:{p1:1},rules:{}},dataQuality:quality})};
+  }
+  static async run(runner){
+    const {CoreUtil}=host(),fx=this.fixture(runner),generator=new DecisionCandidateGenerator(),gate=new DecisionFeasibilityGate(),trade=new DecisionTradeoffEngine(),ranking=new DecisionRankingEngine();
+    await runner.test('Decision Context','data-quality contract is deterministic',()=>{const q=new DecisionContextBuilder(host().app).dataQuality([fx.task],fx.data.projects,fx.context.capacity,[]);runner.assert(Number.isFinite(q.completeness)&&Array.isArray(q.missingInputs)&&Array.isArray(q.unavailableSignals))});
+    await runner.test('Decision Context','synthetic decision context is immutable at boundary',()=>runner.assert(Object.isFrozen(fx.context)&&fx.context.decisionDate===fx.date));
+    await runner.test('Decision Fingerprint','decision hash repeats for identical structured input',()=>runner.assert(decisionHash({a:1,b:['x',2]})===decisionHash({a:1,b:['x',2]})));
+    await runner.test('Decision Fingerprint','candidate identity is stable across repeated generation',()=>{const req={type:DECISION_TYPES.NEXT_ACTION,date:fx.date,mode:'production'},a=generator.generate(req,fx.context).map(x=>x.id),b=generator.generate(req,fx.context).map(x=>x.id);runner.assert(CoreUtil.hash(a)===CoreUtil.hash(b))});
+    await runner.test('Decision Candidate Generation','NEXT_ACTION includes keep-current and actionable work',()=>{const rows=generator.generate({type:DECISION_TYPES.NEXT_ACTION,date:fx.date},fx.context);runner.assert(rows.some(x=>x.kind===KEEP_CURRENT_PLAN)&&rows.some(x=>x.kind==='task-session'))});
+    await runner.test('Decision Feasibility','keep-current is always a zero-mutation feasible baseline',()=>runner.assert(gate.evaluate({id:KEEP_CURRENT_PLAN,kind:KEEP_CURRENT_PLAN,changes:[]},fx.context).feasible));
+    await runner.test('Decision Feasibility','locked task candidate is rejected as a hard constraint',()=>{const task={...fx.task,locked:true},context={...fx.context,tasks:[task],readyTasks:[task],data:{...fx.context.data,tasks:[task]}},candidate={id:'locked',kind:'task-session',taskId:task.id,title:task.title,duration:30,date:fx.date,startMinute:600,affectedEntityIds:[task.id]};runner.assert(!gate.evaluate(candidate,context).feasible)});
+    await runner.test('Decision Trade-offs','keep-current has zero quantified opportunity cost',()=>{const f=gate.evaluate({id:KEEP_CURRENT_PLAN,kind:KEEP_CURRENT_PLAN,changes:[]},fx.context),t=trade.evaluate({id:KEEP_CURRENT_PLAN,kind:KEEP_CURRENT_PLAN,changes:[]},fx.context,f);runner.assert(t.opportunityCostMinutes===0&&t.capacityConsumedMinutes===0)});
+    await runner.test('Decision Ranking','infeasible candidates are excluded before ranking',()=>{const rows=[{candidate:{id:'bad',kind:'task-session'},feasibility:{feasible:false},tradeoffs:{}},{candidate:{id:KEEP_CURRENT_PLAN,kind:KEEP_CURRENT_PLAN},feasibility:{feasible:true},tradeoffs:{deadlineProtection:0,forecastImpact:0,projectAlignment:0,ruleAlignment:0,capacityFit:1,opportunityCostMinutes:0,disruption:0,recoveryImpact:0,contextCost:0,intelligenceAlignment:0,bufferImpact:0,capacityConsumedMinutes:0}}],out=ranking.rank(rows);runner.assert(out.length===1&&out[0].candidate.id===KEEP_CURRENT_PLAN)});
+    await runner.test('Decision Ranking','stable tie-break uses candidate identity',()=>{const t={deadlineProtection:0,forecastImpact:0,projectAlignment:0,ruleAlignment:0,capacityFit:1,opportunityCostMinutes:0,disruption:0,recoveryImpact:0,contextCost:0,intelligenceAlignment:0,bufferImpact:0,capacityConsumedMinutes:1},rows=['b','a'].map(id=>({candidate:{id,kind:'task-session'},feasibility:{feasible:true},tradeoffs:{...t}})),out=ranking.rank(rows);runner.assert(out.map(x=>x.candidate.id).join(',')==='a,b')});
+    await runner.test('Decision Preview','preview exposes explicit current and proposed structures',()=>{const candidate={id:'preview-self',kind:'task-session',taskId:fx.task.id,title:fx.task.title,duration:30,date:fx.date,startMinute:600,changes:[],affectedEntityIds:[fx.task.id]},choice={candidate,tradeoffs:{opportunityCostMinutes:15,capacityConsumedMinutes:30,remainingCapacityMinutes:450,competingDemandMinutes:15,forecastEffect:{riskPointReduction:0},projectEffect:{},stability:{}},explanation:{changes:['Reserve 30 minutes.'],risks:[]}},decision={decisionId:'decision-self-preview',contextFingerprint:'fp',alternatives:[choice]},p=new DecisionPreviewManager().build(decision,candidate.id);runner.assert(p.immutable&&p.current&&p.proposed&&p.forecastEffect&&p.opportunity&&p.proposed.blockCount===1)});
+    await runner.test('Decision Atomicity','apply path retains one UndoManager transaction coordinator',()=>{const src=DecisionApplyCoordinator.prototype.commitUndo.toString();runner.assert(src.includes('this.app.undo.execute')&&src.includes('expectedRevisions'))});
+    await runner.test('Decision Concurrency','apply revalidates again inside queued exclusive lock',()=>{const src=DecisionApplyCoordinator.prototype.apply.toString();runner.assert(src.includes('withQueuedExclusiveLock')&&src.includes('lockedFresh=await this.revalidate(decision)')&&src.includes('lockedFeasibility'))});
+    await runner.test('Decision Scenario','scenario Apply remains production-write blocked',()=>runner.assert(DecisionApplyCoordinator.prototype.apply.toString().includes('DECISION-SCENARIO-APPLY-461')));
+    await runner.test('Decision Data Quality','missing duration is disclosed and lowers completeness',()=>{const q=new DecisionContextBuilder(host().app).dataQuality([{...fx.task,estimatedDuration:0,remainingDuration:0}],fx.data.projects,fx.context.capacity,[]);runner.assert(q.missingInputs.length>0&&q.completeness<1)});
+    await runner.test('Decision Privacy','Decision Engine contains no remote-network primitive',()=>{const source=[DecisionEngine,DecisionContextBuilder,DecisionCandidateGenerator,DecisionFeasibilityGate,DecisionTradeoffEngine,DecisionApplyCoordinator,DecisionBriefEngine,DecisionOutcomeEngine].map(x=>x.toString()).join('\n');runner.assert(!/(fetch\s*\(|XMLHttpRequest|WebSocket|EventSource)/.test(source))});
+    await runner.test('Decision Brief','morning brief composes day and deadline decisions locally',async()=>{const fakeDecision={decisionId:'brief',recommended:{explanation:{summary:'Local recommendation'}}},engine={analyze:async request=>({...fakeDecision,request})},app={repo:{dataset:async()=>fx.data,settings:async()=>fx.settings}},briefEngine=new DecisionBriefEngine(engine,app,{pending:async()=>[]}),value=await briefEngine.morning(fx.date);runner.assert(value.localOnly&&value.todayRecommendation.request.type===DECISION_TYPES.TODAY_PLAN&&value.deadlineRecommendation.request.type===DECISION_TYPES.DEADLINE_TRIAGE)});
+    await runner.test('Decision Outcome','applied decision follow-up persists then records outcome',async()=>{const rows=new Map(),repo={get:async(_s,id)=>rows.get(id)||null,save:async(_s,row)=>{rows.set(row.id,clone(row));return row},all:async()=>[...rows.values()]},engine=new DecisionOutcomeEngine({repo}),decision={decisionId:'outcome-self',request:{date:fx.date}},choice={candidate:{id:'alt-self',title:'Outcome self'}};await engine.create(decision,choice,'op-self');const value=await engine.record(decision.decisionId,'Worked','validated');runner.assert(value.status==='Recorded'&&value.outcome==='Worked'&&value.operationId==='op-self')});
+  }
+}
+function extendDecisionSelfTests(api){
+  const Runner=api.SelfTestRunner;
+  if(!Runner||Runner.prototype.__decision462Extended)return false;
+  const original=Runner.prototype.run;
+  Runner.prototype.__decision462Extended=true;
+  Runner.prototype.run=async function(){
+    const base=await original.call(this);
+    await DecisionSelfTestExtension.run(this);
+    const groups={};for(const result of this.results){const group=groups[result.group]||(groups[result.group]={passed:0,total:0});group.total++;if(result.pass)group.passed++}
+    const passed=this.results.filter(result=>result.pass).length,total=this.results.length;
+    return{...base,decisionEngineVersion:DECISION_ENGINE_VERSION,completedAt:nowISO(),passed,total,groups,results:this.results,healthy:passed===total};
+  };
+  return true;
+}
 
 class DecisionEngine{
   constructor(app=host().app){
