@@ -42,9 +42,26 @@ write('index.html',index);
 let decision=read('decision-engine.js');
 decision=swap(decision,"const DECISION_ENGINE_VERSION='4.6.1';","const DECISION_ENGINE_VERSION='4.6.2';",'Decision Engine version');
 if(!decision.includes("const DECISION_MASTER_SPEC_MARKER='4.6.2';"))decision=swap(decision,"const DECISION_COMPLETION_MARKER='4.6.1';","const DECISION_COMPLETION_MARKER='4.6.1';\nconst DECISION_MASTER_SPEC_MARKER='4.6.2';",'master-spec marker');
+decision=swap(decision,"const DECISION_MASTER_SPEC_MARKER='4.6.2';\nconst HARD_RULE_ACTIONS", "const DECISION_MASTER_SPEC_MARKER='4.6.2';\nconst DECISION_MAX_APPLY_AGE_MS=5*60*1000;\nconst HARD_RULE_ACTIONS",'bounded decision apply age');
+
+// A recommendation fingerprint represents planning state, not the wall-clock minute.
+// Current time still remains in the Context for candidate generation and hard revalidation.
+decision=swap(decision,"      date,time:civil.time||'',timeZoneId:zone,mode,","      date,timeZoneId:zone,mode,",'state fingerprint excludes ephemeral minute');
 
 decision=replaceClass(decision,'DecisionPreviewManager','DecisionApplyCoordinator',fragment('preview.js.txt'));
 decision=swap(decision,"constructor(app=host().app){this.app=app}\n  async revalidate(decision)","constructor(app=host().app,outcomes=null){this.app=app;this.outcomes=outcomes}\n  async revalidate(decision)",'Apply coordinator outcome injection');
+decision=swap(
+  decision,
+  "  async revalidate(decision){const context=await new DecisionContextBuilder(this.app).build(decision.request);return{fresh:context.contextFingerprint===decision.contextFingerprint,context}}",
+  "  async revalidate(decision){const context=await new DecisionContextBuilder(this.app).build(decision.request),generatedAtMs=Date.parse(decision.generatedAt||''),ageMs=Number.isFinite(generatedAtMs)?Math.max(0,Date.now()-generatedAtMs):Infinity,stateFresh=context.contextFingerprint===decision.contextFingerprint,temporalFresh=ageMs<=DECISION_MAX_APPLY_AGE_MS;return{fresh:stateFresh&&temporalFresh,stateFresh,temporalFresh,ageMs,context}}",
+  'state/temporal freshness separation'
+);
+decision=swap(
+  decision,
+  "      const startMinute=CoreUtil.clock(block.startTime);if(startMinute===null){blockers.push('Candidate contains an invalid start time.');continue}const start=CoreUtil.dayIndex(block.date)*1440+startMinute,duration=Math.max(0,num(block.duration)),interval={sourceId:`decision:${candidate.id}:${block.id}`,startDateTime:start,endDateTime:start+duration,minutes:duration,locked:false};",
+  "      const startMinute=CoreUtil.clock(block.startTime);if(startMinute===null){blockers.push('Candidate contains an invalid start time.');continue}const currentMinute=block.date===context.currentDate?CoreUtil.clock(context.currentLocalTime):null;if(currentMinute!==null&&startMinute<currentMinute){blockers.push('Candidate start time has already passed.');evidence.push(reason('CANDIDATE-TIME-PASSED','DecisionFeasibilityGate','startMinute',startMinute,`current ${currentMinute}`,'hard'));continue}const start=CoreUtil.dayIndex(block.date)*1440+startMinute,duration=Math.max(0,num(block.duration)),interval={sourceId:`decision:${candidate.id}:${block.id}`,startDateTime:start,endDateTime:start+duration,minutes:duration,locked:false};",
+  'past candidate start fails closed'
+);
 decision=replaceSpan(decision,"  async record(decision,choice,status,extra={}){","\n}\nclass DecisionHistory{",fragment('record-method.js.txt'));
 
 if(!decision.includes('class DecisionOutcomeEngine{')){
