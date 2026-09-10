@@ -1,9 +1,9 @@
 'use strict';
 
-  const APP_VERSION='4.6.0';
+  const APP_VERSION='4.6.1';
   const INTELLIGENCE_MODEL_VERSION='4.4.2';
   const RULE_ENGINE_VERSION='4.5.1';
-  const DECISION_ENGINE_VERSION='4.6.0';
+  const DECISION_ENGINE_VERSION='4.6.1';
   const RULE_SCHEMA_VERSION=1;
   const MAX_RULE_CHAIN_DEPTH=5;
   const RULE_HISTORY_LIMIT=250;
@@ -11,7 +11,7 @@
   const DB_SCHEMA_VERSION=16;
   const SCHEDULER_VERSION='4.1.0';
   const BACKUP_VERSION=2;
-  const BUILD_NAME='Professional Core · Decision Engine, Goal Alignment & Adaptive Planning';
+  const BUILD_NAME='Professional Core · Decision Planning Completion';
   const DB_NAME='LifeOSDB';
 
   const STORE_DEFINITIONS={
@@ -331,6 +331,7 @@
   class OperationLockManager{
     constructor(repository,tabId){this.repo=repository;this.tabId=tabId||CoreUtil.uid();this.currentOperation='';this.heartbeat=null;this.leaseMs=45000}
     async withExclusiveLock(label,operation){const name='lifeos:data-critical';if(globalThis.navigator?.locks?.request)return navigator.locks.request(name,{mode:'exclusive',ifAvailable:true},async lock=>{if(!lock)throw CoreUtil.error('CROSS-TAB-LOCK-001',`${label} is already running in another LifeOS window.`,{operation:label});this.currentOperation=label;try{return await operation()}finally{this.currentOperation=''}});return this.withFallbackLease(label,operation)}
+    async withQueuedExclusiveLock(label,operation){const name='lifeos:data-critical';if(globalThis.navigator?.locks?.request)return navigator.locks.request(name,{mode:'exclusive'},async lock=>{if(!lock)throw CoreUtil.error('CROSS-TAB-LOCK-001',`${label} could not acquire the LifeOS data lock.`,{operation:label});this.currentOperation=label;try{return await operation()}finally{this.currentOperation=''}});return this.withFallbackLease(label,operation)/* DECISION-WEB-LOCK-QUEUE-461 */}
     async withFallbackLease(label,operation){const id='runtime-lock:data-critical',now=Date.now(),expiresAt=new Date(now+this.leaseMs).toISOString(),operationId=CoreUtil.uid();await this.repo.db.transaction(['systemMeta'],'readwrite',async tx=>{const current=await tx.get('systemMeta',id);if(current&&current.ownerTabId!==this.tabId&&Date.parse(current.expiresAt)>now)throw CoreUtil.error('CROSS-TAB-LOCK-001',`${current.label||label} is already running in another LifeOS window.`,{operation:label,ownerTabId:current.ownerTabId});await tx.put('systemMeta',{id,ownerTabId:this.tabId,operationId,label,acquiredAt:CoreUtil.nowISO(),heartbeatAt:CoreUtil.nowISO(),expiresAt,updatedAt:CoreUtil.nowISO()})});this.currentOperation=label;this.heartbeat=setInterval(()=>this.renewFallback(id,operationId).catch(()=>{}),15000);try{return await operation()}finally{clearInterval(this.heartbeat);this.heartbeat=null;await this.releaseFallback(id,operationId).catch(()=>{});this.currentOperation=''}}
     async renewFallback(id,operationId){await this.repo.db.transaction(['systemMeta'],'readwrite',async tx=>{const current=await tx.get('systemMeta',id);if(current?.ownerTabId===this.tabId&&current.operationId===operationId)await tx.put('systemMeta',{...current,heartbeatAt:CoreUtil.nowISO(),expiresAt:new Date(Date.now()+this.leaseMs).toISOString(),updatedAt:CoreUtil.nowISO()})})}
     async releaseFallback(id,operationId){await this.repo.db.transaction(['systemMeta'],'readwrite',async tx=>{const current=await tx.get('systemMeta',id);if(current?.ownerTabId===this.tabId&&current.operationId===operationId)await tx.delete('systemMeta',id)})}
@@ -1949,5 +1950,5 @@
   }
 
   const lifeOS=new App();
-  globalThis.LifeOS={app:lifeOS,decisionEngineVersion:DECISION_ENGINE_VERSION,ruleEngineVersion:RULE_ENGINE_VERSION,RuleEngine,RULE_TRIGGERS,RULE_CONDITIONS,RULE_ACTIONS,RULE_TEMPLATES,RULE_TRIGGER_PRODUCERS,RULE_ACTION_EXECUTORS,RULE_PLANNING_PREFERENCES,version:APP_VERSION,schemaVersion:DB_SCHEMA_VERSION,schedulerVersion:SCHEDULER_VERSION,forecastModelVersion:FORECAST_MODEL_VERSION,calendarEngineVersion:CALENDAR_ENGINE_VERSION,intelligenceModelVersion:INTELLIGENCE_MODEL_VERSION,CoreUtil,TimeZoneEngine,CivilTimeEngine,CrossTabCoordinator,OperationLockManager,StorageHealthManager,ComputeManager,TimeInterval,IntervalSplitter,SleepEngine,EventTimeEngine,ConflictEngine,CapacityEngine,ScheduleStabilityEngine,ScheduleRepairEngine,FreezeManager,RecoveryTimeEngine,ContextSwitchEngine,PersonalPlanningModel,IntelligenceStatistics,IntelligenceConfidenceEngine,IntelligenceDatasetBuilder,PersonalBaselineEngine,PersonalIntelligenceEngine,DayScheduler,WeekScheduler,DeadlineEngine,ProjectForecastEngine,ForecastConfidenceEngine,SensitivityEngine,AssumptionInspector,MonteCarloEngine,ScenarioModificationValidator,ScenarioDataView,ScenarioDiffEngine,ScenarioApplyPlanner,ScenarioEngine,CalendarSnapEngine,CalendarOverlapEngine,CalendarInteractionPolicy,CalendarInteractionEngine,RecurrenceEngine,IntegrityEngine,SelfTestRunner};
+  globalThis.LifeOS={app:lifeOS,decisionEngineVersion:DECISION_ENGINE_VERSION,ruleEngineVersion:RULE_ENGINE_VERSION,RuleEngine,RULE_TRIGGERS,RULE_CONDITIONS,RULE_ACTIONS,RULE_TEMPLATES,RULE_TRIGGER_PRODUCERS,RULE_ACTION_EXECUTORS,RULE_PLANNING_PREFERENCES,version:APP_VERSION,schemaVersion:DB_SCHEMA_VERSION,schedulerVersion:SCHEDULER_VERSION,forecastModelVersion:FORECAST_MODEL_VERSION,calendarEngineVersion:CALENDAR_ENGINE_VERSION,intelligenceModelVersion:INTELLIGENCE_MODEL_VERSION,CoreUtil,TimeZoneEngine,CivilTimeEngine,CrossTabCoordinator,OperationLockManager,StorageHealthManager,ComputeManager,TimeInterval,IntervalSplitter,SleepEngine,EventTimeEngine,ConflictEngine,CapacityEngine,ScheduleStabilityEngine,ScheduleRepairEngine,FreezeManager,RecoveryTimeEngine,ContextSwitchEngine,PersonalPlanningModel,IntelligenceStatistics,IntelligenceConfidenceEngine,IntelligenceDatasetBuilder,PersonalBaselineEngine,PersonalIntelligenceEngine,DayScheduler,WeekScheduler,ProjectAllocator,DeadlineEngine,ProjectForecastEngine,ForecastConfidenceEngine,SensitivityEngine,AssumptionInspector,MonteCarloEngine,ScenarioModificationValidator,ScenarioDataView,ScenarioDiffEngine,ScenarioApplyPlanner,ScenarioEngine,CalendarSnapEngine,CalendarOverlapEngine,CalendarInteractionPolicy,CalendarInteractionEngine,RecurrenceEngine,IntegrityEngine,SelfTestRunner};
   document.readyState==='loading'?document.addEventListener('DOMContentLoaded',()=>lifeOS.init()):lifeOS.init();

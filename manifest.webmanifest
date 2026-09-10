@@ -1,6 +1,6 @@
 {
-  "name": "LifeOS 4.6 — Decision Engine, Goal Alignment & Adaptive Planning",
-  "short_name": "LifeOS 4.6",
+  "name": "LifeOS 4.6.1 — Decision Planning Completion",
+  "short_name": "LifeOS 4.6.1",
   "description": "A local-first personal operating system with deterministic decision support, goal alignment, adaptive planning, transparent trade-offs, professional calendar workflows and offline-first data safety.",
   "id": "./",
   "start_url": "./index.html",
