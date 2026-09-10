@@ -187,8 +187,63 @@ class DecisionExplanationEngine{
   explain(row,runnerUp,context){const {candidate,tradeoffs}=row,{CoreUtil}=host();if(candidate.kind===KEEP_CURRENT_PLAN)return{summary:'Keep the current plan. No alternative creates enough evidence-backed improvement to justify disruption.',protects:['Schedule stability','Existing commitments'],changes:['No production change'],defers:[],risks:context.dataQuality.warnings||[],opportunityCost:'0 minutes of additional capacity are committed; the current plan is preserved.',opportunityCostMinutes:0,forecastEffect:tradeoffs.forecastEffect,reasons:tradeoffs.reasons};const blocks=candidate.kind==='task-session'?[{taskId:candidate.taskId,date:candidate.date,startTime:CoreUtil.time(candidate.startMinute),duration:candidate.duration}]:PLAN_KINDS.has(candidate.kind)?array(candidate.plan?.planned).map(x=>x.block):candidate.kind==='deferral-plan'?array(candidate.changes).filter(c=>c.store==='timeBlocks'&&c.after).map(c=>c.after):[],taskNames=[...new Set(blocks.map(b=>context.tasks.find(t=>t.id===b.taskId)?.title).filter(Boolean))],changes=[];if(PLAN_KINDS.has(candidate.kind))changes.push(`Schedule ${blocks.length} task block${blocks.length===1?'':'s'} totaling ${blocks.reduce((s,b)=>s+num(b.duration),0)} minutes.`);else if(candidate.kind==='deferral-plan')changes.push(`Move ${num(candidate.metadata?.freedMinutes)} scheduled minutes to ${candidate.targetDate} and update the task deferral state.`);else if(['plan-repair','schedule-conflict-plan'].includes(candidate.kind))changes.push(`Apply ${array(candidate.changes).length} validated schedule repair change${array(candidate.changes).length===1?'':'s'}.`);else changes.push(`Reserve ${candidate.duration} minutes for ${candidate.title} from ${CoreUtil.time(candidate.startMinute)}.`);const f=tradeoffs.forecastEffect||{},protects=[];if(f.improvedTasks)protects.push(`Improves ${f.improvedTasks} deadline forecast${f.improvedTasks===1?'':'s'}; shortfall changes ${f.shortfallBefore}→${f.shortfallAfter} minutes.`);if(tradeoffs.projectEffect?.improvedProjects)protects.push(`Reduces allocation shortfall for ${tradeoffs.projectEffect.improvedProjects} project${tradeoffs.projectEffect.improvedProjects===1?'':'s'}.`);if(!protects.length)protects.push('Preserves hard feasibility while using available planning capacity.');const opportunityCost=`Commits ${Math.round(num(tradeoffs.capacityConsumedMinutes))} minutes; ${Math.round(num(tradeoffs.remainingCapacityMinutes))} minutes of focus capacity remain across the affected horizon; ${Math.round(num(tradeoffs.opportunityCostMinutes))} minutes of competing ready-work demand remain uncovered.`,defers=context.readyTasks.filter(t=>!blocks.some(b=>b.taskId===t.id)&&t.id!==candidate.taskId).slice(0,3).map(t=>t.title),runner=runnerUp?.candidate,whyLower=runner&&runner.kind!==KEEP_CURRENT_PLAN?`${runner.title} ranked lower after hard feasibility, forecast delta, project allocation, quantified opportunity cost, stability, recovery and context-switch costs were compared.`:'Keeping the current plan ranked lower because this feasible option produces a material evidence-backed planning benefit.';return{summary:candidate.kind==='deferral-plan'?candidate.title:PLAN_KINDS.has(candidate.kind)?`${candidate.title}: ${blocks.length} blocks / ${blocks.reduce((s,b)=>s+num(b.duration),0)} minutes.`:['plan-repair','schedule-conflict-plan'].includes(candidate.kind)?candidate.title:`Do ${candidate.title} for ${candidate.duration} minutes now.`,protects,changes,defers,risks:[...(context.dataQuality.missingInputs||[]),...(row.feasibility.warnings||[])],opportunityCost,opportunityCostMinutes:tradeoffs.opportunityCostMinutes,forecastEffect:f,whyLower,reasons:tradeoffs.reasons,taskNames}
   }
 }
-class DecisionPreviewManager{\n  currentBlocks(candidate){\n    if(PLAN_KINDS.has(candidate.kind))return array(candidate.plan?.remove);\n    if(['deferral-plan','plan-repair','schedule-conflict-plan'].includes(candidate.kind))return array(candidate.changes).filter(c=>c.store==='timeBlocks' && c.before).map(c=>c.before);\n    return[];\n  }\n  proposedBlocks(candidate){\n    if(PLAN_KINDS.has(candidate.kind))return array(candidate.plan?.planned).map(x=>x.block);\n    if(candidate.kind==='task-session')return[{taskId:candidate.taskId,date:candidate.date,startTime:host().CoreUtil.time(candidate.startMinute),duration:candidate.duration}];\n    if(['deferral-plan','plan-repair','schedule-conflict-plan'].includes(candidate.kind))return array(candidate.changes).filter(c=>c.store==='timeBlocks' && c.after).map(c=>c.after);\n    return[];\n  }\n  build(decision,alternativeId){\n    const choice=decision.alternatives.find(a=>a.candidate.id===alternativeId)||decision.alternatives[0];\n    if(!choice)throw new Error('No feasible alternative is available.');\n    const candidate=choice.candidate,currentBlocks=this.currentBlocks(candidate),blocks=this.proposedBlocks(candidate),tradeoffs=choice.tradeoffs||{},forecast=clone(tradeoffs.forecastEffect||{});\n    return{\n      previewId:`preview:${decision.decisionId}:${candidate.id}`,\n      decisionId:decision.decisionId,\n      alternativeId:candidate.id,\n      contextFingerprint:decision.contextFingerprint,\n      productionFingerprintBefore:decision.contextFingerprint,\n      current:{\n        scope:'affected-schedule',\n        blockCount:currentBlocks.length,\n        blocks:clone(currentBlocks),\n        changeCount:currentBlocks.length,\n        summary:currentBlocks.length?`${currentBlocks.length} affected production block${currentBlocks.length===1?'':'s'} before this alternative.`:'No existing affected production block; the current state is unchanged.'\n      },\n      proposed:{\n        type:candidate.kind,\n        taskId:candidate.taskId||'',\n        date:candidate.date,\n        duration:candidate.duration,\n        startMinute:candidate.startMinute,\n        blockCount:blocks.length,\n        blocks:clone(blocks),\n        changeCount:array(candidate.changes).length,\n        summary:blocks.length?`${blocks.length} proposed block${blocks.length===1?'':'s'} in the affected scope.`:candidate.kind===KEEP_CURRENT_PLAN?'Keep the current plan with no production mutation.':'The proposal changes state without adding a schedule block.'
-      },\n      changes:clone(choice.explanation.changes),\n      warnings:clone(choice.explanation.risks),\n      forecastEffect:forecast,\n      opportunity:{\n        opportunityCostMinutes:num(tradeoffs.opportunityCostMinutes),\n        capacityConsumedMinutes:num(tradeoffs.capacityConsumedMinutes),\n        remainingCapacityMinutes:num(tradeoffs.remainingCapacityMinutes),\n        competingDemandMinutes:num(tradeoffs.competingDemandMinutes),\n        projectEffect:clone(tradeoffs.projectEffect||{}),\n        stability:clone(tradeoffs.stability||{})\n      },\n      opportunityCostMinutes:num(tradeoffs.opportunityCostMinutes),\n      generatedAt:nowISO(),\n      immutable:true\n    };\n  }\n}
+class DecisionPreviewManager{
+  currentBlocks(candidate){
+    if(PLAN_KINDS.has(candidate.kind))return array(candidate.plan?.remove);
+    if(['deferral-plan','plan-repair','schedule-conflict-plan'].includes(candidate.kind))return array(candidate.changes).filter(c=>c.store==='timeBlocks'&&c.before).map(c=>c.before);
+    return[];
+  }
+  proposedBlocks(candidate){
+    if(PLAN_KINDS.has(candidate.kind))return array(candidate.plan?.planned).map(x=>x.block);
+    if(candidate.kind==='task-session')return[{taskId:candidate.taskId,date:candidate.date,startTime:host().CoreUtil.time(candidate.startMinute),duration:candidate.duration}];
+    if(['deferral-plan','plan-repair','schedule-conflict-plan'].includes(candidate.kind))return array(candidate.changes).filter(c=>c.store==='timeBlocks'&&c.after).map(c=>c.after);
+    return[];
+  }
+  build(decision,alternativeId){
+    const choice=decision.alternatives.find(a=>a.candidate.id===alternativeId)||decision.alternatives[0];
+    if(!choice)throw new Error('No feasible alternative is available.');
+    const candidate=choice.candidate,currentBlocks=this.currentBlocks(candidate),blocks=this.proposedBlocks(candidate),tradeoffs=choice.tradeoffs||{},forecast=clone(tradeoffs.forecastEffect||{});
+    return{
+      previewId:`preview:${decision.decisionId}:${candidate.id}`,
+      decisionId:decision.decisionId,
+      alternativeId:candidate.id,
+      contextFingerprint:decision.contextFingerprint,
+      productionFingerprintBefore:decision.contextFingerprint,
+      current:{
+        scope:'affected-schedule',
+        blockCount:currentBlocks.length,
+        blocks:clone(currentBlocks),
+        changeCount:currentBlocks.length,
+        summary:currentBlocks.length?`${currentBlocks.length} affected production block${currentBlocks.length===1?'':'s'} before this alternative.`:'No existing affected production block; the current state is unchanged.'
+      },
+      proposed:{
+        type:candidate.kind,
+        taskId:candidate.taskId||'',
+        date:candidate.date,
+        duration:candidate.duration,
+        startMinute:candidate.startMinute,
+        blockCount:blocks.length,
+        blocks:clone(blocks),
+        changeCount:array(candidate.changes).length,
+        summary:blocks.length?`${blocks.length} proposed block${blocks.length===1?'':'s'} in the affected scope.`:candidate.kind===KEEP_CURRENT_PLAN?'Keep the current plan with no production mutation.':'The proposal changes state without adding a schedule block.'
+      },
+      changes:clone(choice.explanation?.changes||[]),
+      warnings:clone(choice.explanation?.risks||[]),
+      forecastEffect:forecast,
+      opportunity:{
+        opportunityCostMinutes:num(tradeoffs.opportunityCostMinutes),
+        capacityConsumedMinutes:num(tradeoffs.capacityConsumedMinutes),
+        remainingCapacityMinutes:num(tradeoffs.remainingCapacityMinutes),
+        competingDemandMinutes:num(tradeoffs.competingDemandMinutes),
+        projectEffect:clone(tradeoffs.projectEffect||{}),
+        stability:clone(tradeoffs.stability||{})
+      },
+      opportunityCostMinutes:num(tradeoffs.opportunityCostMinutes),
+      generatedAt:nowISO(),
+      immutable:true
+    };
+  }
+}
 class DecisionApplyCoordinator{
   constructor(app=host().app,outcomes=null){this.app=app;this.outcomes=outcomes}
   async revalidate(decision){const context=await new DecisionContextBuilder(this.app).build(decision.request);return{fresh:context.contextFingerprint===decision.contextFingerprint,context}}
@@ -205,8 +260,17 @@ class DecisionApplyCoordinator{
       if(candidate.kind==='deferral-plan'){const mutation=this.deferralChanges(candidate,executionContext),operation=await this.commitUndo(decision,choice,mutation,`Decision — ${candidate.title}`);return this.record(decision,choice,'Applied',{operationId:operation.id})}
       const task=executionContext.tasks.find(t=>t.id===candidate.taskId);if(!task)throw new Error('Task no longer exists.');const {CoreUtil}=host(),start=candidate.startMinute,block={id:CoreUtil.uid(),date:candidate.date,startTime:CoreUtil.time(start),endTime:CoreUtil.time(start+candidate.duration),duration:candidate.duration,type:'task',taskId:task.id,projectId:task.projectId||'',lifeAreaId:task.lifeAreaId||'',title:task.title||candidate.title,sourceType:'decision',sourceId:task.id,decisionId:decision.decisionId,manuallyPlaced:true,locked:false,createdAt:nowISO(),updatedAt:nowISO(),revision:1},change={store:'timeBlocks',id:block.id,before:null,after:block},operation=await this.commitUndo(decision,choice,{changes:[change],expectedRevisions:{}},`Decision — ${choice.label||candidate.title}`);if(!await this.app.repo.get('timeBlocks',block.id)){const error=CoreUtil.error('DECISION-COMMIT-VISIBILITY-461','The accepted decision did not become durably readable after its atomic commit.');throw error}return this.record(decision,choice,'Applied',{operationId:operation.id})};return this.app.operationLocks?.withQueuedExclusiveLock?this.app.operationLocks.withQueuedExclusiveLock('Decision apply',op):this.app.operationLocks?this.app.operationLocks.withExclusiveLock('Decision apply',op):op()
   }
-  async record(decision,choice,status,extra={}){const affected=[...new Set([...(choice.candidate.affectedEntityIds||[]),choice.candidate.taskId,choice.candidate.projectId].filter(Boolean))],record={id:`decision-history:${decision.decisionId}:${Date.now()}`,decisionId:decision.decisionId,type:decision.request.type,selectedAlternative:choice.candidate.id,status,reasons:choice.tradeoffs.reasons,affectedEntityIds:affected,operationId:extra.operationId||'',generatedAt:decision.generatedAt,appliedAt:status==='Applied'?nowISO():'',candidateTitle:choice.candidate.title||'',decisionEngineVersion:DECISION_ENGINE_VERSION};try{await this.app.repo.save('activityLog',{...record,type:'decision-history',text:`${status}: ${choice.candidate.title}`,at:nowISO(),createdAt:nowISO(),updatedAt:nowISO()},{validate:false})}catch{}if(status==='Applied'&&!extra.noChange&&this.outcomes)try{await this.outcomes.create(decision,choice,extra.operationId||'')}catch{}return{record,...extra}}
-}
+  async record(decision,choice,status,extra={}){
+    const affected=[...new Set([...(choice.candidate.affectedEntityIds||[]),choice.candidate.taskId,choice.candidate.projectId].filter(Boolean))],record={
+      id:`decision-history:${decision.decisionId}:${Date.now()}`,decisionId:decision.decisionId,type:decision.request.type,
+      selectedAlternative:choice.candidate.id,status,reasons:choice.tradeoffs.reasons,affectedEntityIds:affected,
+      operationId:extra.operationId||'',generatedAt:decision.generatedAt,appliedAt:status==='Applied'?nowISO():'',
+      candidateTitle:choice.candidate.title||'',decisionEngineVersion:DECISION_ENGINE_VERSION
+    };
+    try{await this.app.repo.save('activityLog',{...record,type:'decision-history',text:`${status}: ${choice.candidate.title}`,at:nowISO(),createdAt:nowISO(),updatedAt:nowISO()},{validate:false})}catch{}
+    if(status==='Applied'&&!extra.noChange&&this.outcomes)try{await this.outcomes.create(decision,choice,extra.operationId||'')}catch{}
+    return{record,...extra};
+  }
 }
 class DecisionHistory{
   constructor(app=host().app){this.app=app}
@@ -270,7 +334,73 @@ class DecisionEngine{
   recordOutcome(decisionId,outcome,notes=''){return this.outcomes.record(decisionId,outcome,notes)}
 }
 
-class DecisionCenterUI{\m $��NG�QRc��1�K��0�c�TO��8�� ���S �D�T,��!:��
+class DecisionCenterUI{
+  constructor(engine){this.engine=engine;this.app=engine.app||host().app;this.current=null;this.preview=null;this.button=null;this.panel=null;this.selectedId='';this.lastApplied=null}
+  mount(){
+    if(document.getElementById('decisionCenterButton'))return;
+    const button=document.createElement('button');button.id='decisionCenterButton';button.className='btn decision-center-launch';button.type='button';button.textContent='Decision Center';button.setAttribute('aria-haspopup','dialog');
+    button.addEventListener('click',()=>this.open());(document.querySelector('.top-actions')||document.body).prepend(button);this.button=button;
+    const dialog=document.createElement('dialog');dialog.id='decisionCenterDialog';dialog.className='decision-center-dialog';dialog.setAttribute('aria-labelledby','decisionCenterTitle');
+    dialog.innerHTML=`<div class="decision-center-shell"><div class="decision-center-head"><div><small>LifeOS 4.6.2</small><h2 id="decisionCenterTitle">Decision Center</h2></div><button class="btn icon" data-decision-close aria-label="Close Decision Center">×</button></div><div class="decision-center-controls"><label>Decision <select data-decision-type><option value="next-action">What should I do now?</option><option value="today-plan">Today plan</option><option value="deadline-triage">Deadline triage</option><option value="project-allocation">Project allocation</option><option value="deferral">Deferral</option><option value="week-priority">Week priority</option><option value="schedule-conflict">Schedule conflict</option><option value="plan-repair">Plan repair</option></select></label><button class="btn primary" data-decision-analyze>Analyze</button></div><div class="decision-brief-actions" role="group" aria-label="Decision reviews"><button class="btn small" data-decision-brief="morning">Morning Decision Brief</button><button class="btn small" data-decision-brief="eod">End-of-Day Decision Review</button></div><div data-decision-status class="muted" role="status" aria-live="polite"></div><div data-decision-body></div></div>`;
+    document.body.append(dialog);this.panel=dialog;
+    dialog.querySelector('[data-decision-close]').onclick=()=>dialog.close();
+    dialog.querySelector('[data-decision-analyze]').onclick=()=>this.analyze();
+    dialog.addEventListener('click',event=>this.handle(event));
+    dialog.addEventListener('change',event=>{const choice=event.target?.dataset?.decisionChoice;if(choice)this.selectedId=choice});
+  }
+  open(){this.panel?.showModal();this.panel?.querySelector('[data-decision-analyze]')?.focus()}
+  async analyze(){
+    const status=this.panel.querySelector('[data-decision-status]'),body=this.panel.querySelector('[data-decision-body]'),type=this.panel.querySelector('[data-decision-type]').value;
+    status.textContent='Analyzing current constraints, capacity, deadlines and trade-offs…';body.innerHTML='';
+    try{
+      this.current=await this.engine.analyze({type,mode:'production',source:'decision-center'});
+      this.preview=null;this.lastApplied=null;this.selectedId=this.current.recommended?.candidate?.id||this.current.alternatives[0]?.candidate?.id||'';
+      status.textContent=`Decision analysis complete. ${this.current.alternatives.length} feasible alternative${this.current.alternatives.length===1?'':'s'} found. Confidence: ${this.current.confidence.label}.`;
+      this.render();
+    }catch(error){status.textContent=error.message;body.innerHTML=`<div class="note warning">${escapeHtml(error.message)}</div>`}
+  }
+  render(){
+    const body=this.panel.querySelector('[data-decision-body]'),decision=this.current;if(!decision){body.innerHTML='';return}
+    if(!decision.recommended){body.innerHTML='<div class="note warning">No feasible alternative is available. Review blocked tasks and hard constraints.</div>';return}
+    const card=(alt,index)=>{
+      const id=escapeHtml(alt.candidate.id),checked=alt.candidate.id===this.selectedId?'checked':'';
+      return`<article class="decision-card ${index===0?'recommended':''}" data-alt="${id}"><div class="decision-choice"><input type="radio" name="decision-alternative" data-decision-choice="${id}" value="${id}" ${checked} aria-label="Choose ${escapeHtml(alt.candidate.title)}"><span>${escapeHtml(alt.label)}</span></div><h3>${escapeHtml(alt.candidate.title)}</h3>${alt.candidate.duration?`<div class="decision-duration">${alt.candidate.duration} min</div>`:''}<p>${escapeHtml(alt.explanation.summary)}</p><div class="decision-grid"><div><b>Protects</b><ul>${alt.explanation.protects.map(x=>`<li>${escapeHtml(x)}</li>`).join('')}</ul></div><div><b>Opportunity cost</b><p>${escapeHtml(alt.explanation.opportunityCost)}</p></div></div><details><summary>Why and trade-offs</summary><ul>${alt.tradeoffs.reasons.map(r=>`<li>${escapeHtml(r.reasonCode)} · ${escapeHtml(r.sourceEngine)}: ${escapeHtml(r.metric)} ${escapeHtml(r.value)}</li>`).join('')}</ul>${alt.explanation.whyLower?`<p>${escapeHtml(alt.explanation.whyLower)}</p>`:''}</details><div class="decision-actions"><button class="btn" data-preview="${id}">Preview</button><button class="btn primary" data-apply="${id}">Apply</button></div></article>`;
+    };
+    const shortfall=decision.capacityShortfall?.shortfallMinutes||0,shortfallNote=shortfall?`<div class="warning"><b>Capacity shortfall:</b> ${shortfall} minutes cannot fit in the remaining focus capacity today.</div>`:'';
+    body.innerHTML=`<section class="decision-summary"><div><b>Recommended decision</b><span class="decision-confidence">Confidence: ${escapeHtml(decision.confidence.label)}</span></div><small>Exact context ${escapeHtml(decision.contextFingerprint)} · ${escapeHtml(String(decision.durationMs))} ms</small></section>${shortfallNote}${decision.dataQuality.missingInputs.length?`<div class="note">${decision.dataQuality.missingInputs.map(escapeHtml).join(' ')}</div>`:''}<div class="decision-card-list">${decision.alternatives.map(card).join('')}</div><div data-preview-output></div>`;
+  }
+  blockList(blocks){
+    return blocks.length?`<ul class="decision-block-list">${blocks.map(block=>`<li>${escapeHtml(block.date||'')} ${escapeHtml(block.startTime||'')} · ${escapeHtml(String(block.duration||0))} min${block.title?` · ${escapeHtml(block.title)}`:''}</li>`).join('')}</ul>`:'<p class="muted">No affected schedule blocks.</p>';
+  }
+  previewHTML(preview){
+    const f=preview.forecastEffect||{},o=preview.opportunity||{};
+    return`<section class="decision-preview" data-decision-preview><div class="decision-preview-head"><div><h3>Preview</h3><p><b>Production state is unchanged until Apply.</b></p></div><span class="pill">Immutable preview</span></div><div class="decision-preview-compare"><section class="decision-preview-panel" data-preview-current><h4>CURRENT</h4><p>${escapeHtml(preview.current.summary)}</p>${this.blockList(preview.current.blocks)}</section><section class="decision-preview-panel" data-preview-proposed><h4>PROPOSED</h4><p>${escapeHtml(preview.proposed.summary)}</p>${this.blockList(preview.proposed.blocks)}</section></div><div class="decision-preview-metrics"><section class="decision-preview-panel" data-preview-forecast><h4>Forecast effect</h4><p>Risk points: <b>${escapeHtml(String(f.beforeRiskPoints??0))} → ${escapeHtml(String(f.afterRiskPoints??0))}</b></p><p>Deadline shortfall: <b>${escapeHtml(String(f.shortfallBefore??0))} → ${escapeHtml(String(f.shortfallAfter??0))} min</b></p><p>Improved tasks: ${escapeHtml(String(f.improvedTasks??0))} · Worsened: ${escapeHtml(String(f.worsenedTasks??0))}</p></section><section class="decision-preview-panel" data-preview-opportunity><h4>Opportunity cost</h4><p>Capacity committed: <b>${escapeHtml(String(o.capacityConsumedMinutes??0))} min</b></p><p>Remaining capacity: <b>${escapeHtml(String(o.remainingCapacityMinutes??0))} min</b></p><p>Competing work uncovered: <b>${escapeHtml(String(o.opportunityCostMinutes??0))} min</b></p></section></div><p>${preview.changes.map(escapeHtml).join(' ')||'No production change.'}</p><small>Fingerprint ${escapeHtml(preview.productionFingerprintBefore)}</small><div class="decision-actions"><button class="btn primary" data-apply="${escapeHtml(preview.alternativeId)}" autofocus>Apply this alternative</button></div></section>`;
+  }
+  async showMorning(){
+    const status=this.panel.querySelector('[data-decision-status]'),body=this.panel.querySelector('[data-decision-body]');status.textContent='Building Morning Decision Brief from local planning data…';
+    try{const brief=await this.engine.morningBrief();const cap=brief.capacity||{};body.innerHTML=`<section class="decision-brief" data-morning-decision-brief><h3>Morning Decision Brief</h3><div class="grid grid-3"><div class="card"><b>Today</b><p>${escapeHtml(brief.summary.today)}</p></div><div class="card"><b>Deadlines</b><p>${escapeHtml(brief.summary.deadlines)}</p><small>${escapeHtml(String(brief.dueCount))} due/near-due active task(s)</small></div><div class="card"><b>Focus capacity</b><p>${escapeHtml(String(cap.focusRemaining??0))} min remaining</p><small>${escapeHtml(cap.status||'Local capacity model')}</small></div></div><p class="muted">Generated locally · no production mutation.</p></section>`;status.textContent='Morning Decision Brief ready.'}catch(error){status.textContent=error.message}
+  }
+  async showEndOfDay(){
+    const status=this.panel.querySelector('[data-decision-status]'),body=this.panel.querySelector('[data-decision-body]');status.textContent='Building End-of-Day Decision Review from local history…';
+    try{const review=await this.engine.endOfDayReview();const pending=review.pendingOutcomes.map(row=>`<div class="decision-follow-up" data-decision-follow-up="${escapeHtml(row.decisionId)}"><b>${escapeHtml(row.text||row.decisionId)}</b><p class="muted">Applied ${escapeHtml(row.appliedAt||'')} · Follow-up ${escapeHtml(row.followUpDate||'')}</p><div class="actions"><button class="btn small" data-decision-outcome="Worked" data-decision-id="${escapeHtml(row.decisionId)}">Worked</button><button class="btn small" data-decision-outcome="Partly" data-decision-id="${escapeHtml(row.decisionId)}">Partly</button><button class="btn small" data-decision-outcome="Did not work" data-decision-id="${escapeHtml(row.decisionId)}">Did not work</button></div></div>`).join('');body.innerHTML=`<section class="decision-brief" data-end-of-day-decision-review><h3>End-of-Day Decision Review</h3><p>${escapeHtml(review.summary)}</p><div><b>Applied today:</b> ${escapeHtml(String(review.appliedCount))}</div>${pending||'<p class="muted">No pending decision outcome follow-up.</p>'}</section>`;status.textContent='End-of-Day Decision Review ready.'}catch(error){status.textContent=error.message}
+  }
+  async handle(event){
+    const target=event.target,brief=target?.dataset?.decisionBrief,outcome=target?.dataset?.decisionOutcome,decisionId=target?.dataset?.decisionId,previewId=target?.dataset?.preview,applyId=target?.dataset?.apply;
+    if(brief==='morning')return this.showMorning();
+    if(brief==='eod')return this.showEndOfDay();
+    if(outcome&&decisionId){const status=this.panel.querySelector('[data-decision-status]');try{await this.engine.recordOutcome(decisionId,outcome);status.textContent=`Decision outcome recorded: ${outcome}.`;return this.showEndOfDay()}catch(error){status.textContent=error.message;return}}
+    if(target?.dataset?.decisionUndo!==undefined){const status=this.panel.querySelector('[data-decision-status]');try{const result=await this.app.undo.undo();if(this.current?.decisionId)try{await this.engine.recordOutcome(this.current.decisionId,'Undone','Undo from Decision Center')}catch{}status.textContent=result?'Decision undone. The production state was restored.':'No Decision operation is available to undo.';this.lastApplied=null;return}catch(error){status.textContent=error.message;return}}
+    if(previewId){
+      this.selectedId=previewId;const radio=this.panel.querySelector(`input[data-decision-choice="${CSS.escape(previewId)}"]`);if(radio)radio.checked=true;
+      this.preview=this.engine.preview(this.current,previewId);const out=this.panel.querySelector('[data-preview-output]');out.innerHTML=this.previewHTML(this.preview);out.scrollIntoView({block:'nearest'});queueMicrotask(()=>out.querySelector('[data-apply]')?.focus());return;
+    }
+    if(applyId){
+      const status=this.panel.querySelector('[data-decision-status]');status.textContent='Revalidating before apply…';
+      try{const result=await this.engine.apply(this.current,applyId);this.lastApplied=result;status.textContent=result.noChange?'Current plan kept. No production mutation was made.':'Decision applied as one logical operation.';const out=this.panel.querySelector('[data-preview-output]');if(!result.noChange&&out)out.insertAdjacentHTML('beforeend','<div class="decision-undo"><button class="btn" data-decision-undo>Undo Decision</button></div>')}
+      catch(error){status.textContent=error.message}
+    }
+  }
+}
 
 function expose(){
   const api=host();
@@ -295,10 +425,10 @@ function expose(){
       const intelligenceEvidence=array(recommended.tradeoffs?.reasons).find(item=>item.reasonCode==='PERSONAL-INTELLIGENCE');
       const evidenceText=intelligenceEvidence?`Historical duration evidence — ${intelligenceEvidence.comparison||'Accepted Personal Intelligence was used as a soft ranking signal.'}`:'Limited historical evidence is available for this decision.';
       const startAction=candidate.kind==='task-session'&&candidate.taskId?`<button class="btn primary" data-action="start-focus" data-id="${escapeHtml(candidate.taskId)}">Start Focus</button>`:'<button class="btn primary" data-action="close-dialog">Keep Current Plan</button>';
-      this.modal.open('What should I do now?',`<div data-decision-what-now data-decision-what-now-evidence="4.6.1"><div class="success-box"><div class="muted">DECISION ENGINE RECOMMENDATION</div><h2>${escapeHtml(candidate.title)}</h2>${candidate.duration?`<div class="metric">${escapeHtml(candidate.duration)} min</div>`:''}<p>${escapeHtml(explanation.summary||'This is the highest-ranked feasible decision under the current constraints.')}</p></div><div class="flow-gap-14"><h3>Why now?</h3><ul>${why||'<li>The recommendation passed hard feasibility and deterministic trade-off ranking.</li>'}</ul><h3>Evidence</h3><p>${escapeHtml(evidenceText)}</p><p class="muted">No calendar changes required</p><h3>What this protects</h3><ul>${protects}</ul><h3>What comes next?</h3><p>${escapeHtml(next)}</p><h3>Opportunity cost</h3><p>${escapeHtml(explanation.opportunityCost||'Remaining capacity is preserved for the next decision.')}</p><h3>Best alternative</h3>${bestAlternative}<p class="muted">Confidence: ${escapeHtml(decision.confidence?.label||'Limited')} · Decision Engine ${escapeHtml(DECISION_ENGINE_VERSION)}</p></div></div>`,'<button class="btn" data-action="close-dialog">Close</button>'+startAction,{subtitle:'Decision-aware recommendation using current hard constraints and trade-offs.'});
+      this.modal.open('What should I do now?',`<div data-decision-what-now data-decision-what-now-evidence="4.6.2"><div class="success-box"><div class="muted">DECISION ENGINE RECOMMENDATION</div><h2>${escapeHtml(candidate.title)}</h2>${candidate.duration?`<div class="metric">${escapeHtml(candidate.duration)} min</div>`:''}<p>${escapeHtml(explanation.summary||'This is the highest-ranked feasible decision under the current constraints.')}</p></div><div class="flow-gap-14"><h3>Why now?</h3><ul>${why||'<li>The recommendation passed hard feasibility and deterministic trade-off ranking.</li>'}</ul><h3>Evidence</h3><p>${escapeHtml(evidenceText)}</p><p class="muted">No calendar changes required</p><h3>What this protects</h3><ul>${protects}</ul><h3>What comes next?</h3><p>${escapeHtml(next)}</p><h3>Opportunity cost</h3><p>${escapeHtml(explanation.opportunityCost||'Remaining capacity is preserved for the next decision.')}</p><h3>Best alternative</h3>${bestAlternative}<p class="muted">Confidence: ${escapeHtml(decision.confidence?.label||'Limited')} · Decision Engine ${escapeHtml(DECISION_ENGINE_VERSION)}</p></div></div>`,'<button class="btn" data-action="close-dialog">Close</button>'+startAction,{subtitle:'Decision-aware recommendation using current hard constraints and trade-offs.'});
       return decision;
     }catch(error){
-      this.modal.open('What should I do now?',`<div data-decision-what-now data-decision-what-now-evidence="4.6.1" class="note warning"><b>Decision analysis could not complete.</b><p>${escapeHtml(error.message)}</p></div>`,'<button class="btn" data-action="close-dialog">Close</button>');
+      this.modal.open('What should I do now?',`<div data-decision-what-now data-decision-what-now-evidence="4.6.2" class="note warning"><b>Decision analysis could not complete.</b><p>${escapeHtml(error.message)}</p></div>`,'<button class="btn" data-action="close-dialog">Close</button>');
       return null;
     }
   };
