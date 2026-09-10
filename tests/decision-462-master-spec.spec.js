@@ -63,14 +63,22 @@ test.describe('LifeOS 4.6.2 Master-Spec Certification Completion',()=>{
     expect(model.current).toBeTruthy();expect(model.proposed).toBeTruthy();expect(model.forecastEffect).toBeTruthy();expect(model.opportunity).toBeTruthy();expect(model.immutable).toBeTruthy()
   });
 
-  test('keyboard only chooses alternative then Preview → Apply → Undo',async({page})=>{
+  test('keyboard only chooses a different alternative then Preview → Apply → Undo',async({page})=>{
     await seedTask(page,{title:'Keyboard master-spec task'});const before=await planningHash(page);
     await tabTo(page,'#decisionCenterButton');await page.keyboard.press('Enter');await expect(page.locator('#decisionCenterDialog')).toBeVisible();
     await expect(page.getByRole('button',{name:'Analyze'})).toBeFocused();await page.keyboard.press('Enter');
     await expect(page.locator('[data-decision-status]')).toContainText('Decision analysis complete');
-    await tabTo(page,'input[data-decision-choice]:checked');await page.keyboard.press('Space');
-    await tabTo(page,'.decision-card.recommended button[data-preview]');await page.keyboard.press('Enter');
+    await tabTo(page,'input[data-decision-choice]:checked');
+    const originalId=await page.evaluate(()=>document.activeElement?.value||'');
+    const optionCount=await page.locator('input[data-decision-choice]').count();expect(optionCount).toBeGreaterThan(1);
+    await page.keyboard.press('ArrowDown');
+    const selectedId=await page.evaluate(()=>document.activeElement?.matches?.('input[data-decision-choice]')?document.activeElement.value:'');
+    expect(selectedId).not.toBe('');expect(selectedId).not.toBe(originalId);
+    await tabTo(page,'button[data-preview]');
+    expect(await page.evaluate(()=>document.activeElement?.dataset?.preview||'')).toBe(selectedId);
+    await page.keyboard.press('Enter');
     await expect(page.locator('[data-decision-preview]')).toBeVisible();
+    expect(await page.evaluate(()=>LifeOS.app.decisionCenter.preview?.alternativeId||'')).toBe(selectedId);
     await expect(page.getByRole('button',{name:'Apply this alternative'})).toBeFocused();await page.keyboard.press('Enter');
     await expect(page.locator('[data-decision-status]')).toContainText('Decision applied as one logical operation');
     await tabTo(page,'button[data-decision-undo]');await page.keyboard.press('Enter');
