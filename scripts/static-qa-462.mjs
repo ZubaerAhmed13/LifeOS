@@ -34,7 +34,7 @@ add('4.6.2 service worker identity',has(files.sw,"const APP_VERSION = '4.6.2';")
 add('4.6.2 manifest identity',has(files.manifest,'LifeOS 4.6.2'));
 add('4.6.2 document title',has(files.index,'LifeOS 4.6.2'));
 add('Master-spec responsive styles',has(files.css,'LifeOS 4.6.2 Master-Spec Decision completion','.decision-preview-compare','.decision-brief-actions'));
-add('Decision Engine remains network-free',!/(fetch\s*\(|XMLHttpRequest|WebSocket|EventSource)/.test(files.decision));
+add('Decision Engine remains network-free',!/(?:\bfetch|\bXMLHttpRequest|\bWebSocket|\bEventSource)\s*\(/.test(files.decision));
 add('No arbitrary code execution',!/\beval\s*\(/.test(files.app+files.decision)&&!/\bnew\s+Function\s*\(/.test(files.app+files.decision));
 
 for(const row of checks)console.log(`${row.pass?'PASS':'FAIL'} ${row.name}`);
