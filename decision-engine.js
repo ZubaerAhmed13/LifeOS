@@ -136,7 +136,7 @@ class DecisionFeasibilityGate{
     for(const block of blocks){const task=context.tasks.find(t=>t.id===block.taskId);if(!task){blockers.push(`Task ${block.taskId||'unknown'} no longer exists.`);continue}if(!activeTask(task)){blockers.push(`${task.title||task.id} is not active.`);continue}if(!readyTask(task,context.tasks)){blockers.push(`${task.title||task.id} has incomplete dependencies.`);evidence.push(reason('DEPENDENCY-BLOCK','DependencyGraph','ready',false,'Requires completed blockers','hard'));continue}if(task.locked||task.protected){blockers.push(`${task.title||task.id} is locked or protected.`);continue}
       const startMinute=CoreUtil.clock(block.startTime);if(startMinute===null){blockers.push('Candidate contains an invalid start time.');continue}const start=CoreUtil.dayIndex(block.date)*1440+startMinute,duration=Math.max(0,num(block.duration)),interval={sourceId:`decision:${candidate.id}:${block.id}`,startDateTime:start,endDateTime:start+duration,minutes:duration,locked:false};
       try{const conflicts=ConflictEngine.checkInterval(interval,sim,context.settings,{task,ignoreIds:[block.id].filter(Boolean)})||[];for(const conflict of conflicts)if(conflict.type!=='soft'){blockers.push(conflict.message||conflict.title||conflict.code||'Hard schedule conflict');evidence.push(reason(conflict.code||'CONFLICT','ConflictEngine','conflict',conflict.type,conflict.title||'','hard'))}else warnings.push(conflict.message||conflict.title||String(conflict))}catch(error){blockers.push(`ConflictEngine validation failed closed: ${error.message}`);evidence.push(reason('CONFLICT-ENGINE-FAILED','ConflictEngine','available',false,'Fail closed','hard'))}
-      try{const allocation=ProjectAllocator.dailyAllowance(task,block.date,sim,context.settings,ProjectAllocator.context(sim,context.settings));if(duration>num(allocation.minutes)){blockers.push(`Project/capacity allowance is ${Math.max(0,num(allocation.minutes))}m but candidate needs ${duration}m.`);evidence.push(reason('PROJECT-ALLOWANCE','ProjectAllocator','minutes',allocation.minutes,`needs ${duration}m`,'hard'))}}catch(error){blockers.push(`ProjectAllocator validation failed closed: ${error.message}`)}
+      try{const allocation=ProjectAllocator.dailyAllowance(task,block.date,sim,context.settings,ProjectAllocator.context(sim,context.settings));if(task.projectId&&!allocation.project){blockers.push(`ProjectAllocator could not resolve project ${task.projectId}; feasibility failed closed.`);evidence.push(reason('PROJECT-ALLOCATOR-BINDING','ProjectAllocator','projectResolved',false,'Fail closed','hard'))}else{const dailyRemaining=Number.isFinite(Number(allocation.dailyMax))?Math.max(0,num(allocation.dailyMax)-num(allocation.dailyUsed)):Infinity,weeklyRemaining=Number.isFinite(Number(allocation.weeklyMax))?Math.max(0,num(allocation.weeklyMax)-num(allocation.weeklyUsed)):Infinity,authoritativeAllowance=Math.max(0,Math.min(num(allocation.minutes),dailyRemaining,weeklyRemaining));if(duration>authoritativeAllowance){blockers.push(`Project/capacity allowance is ${authoritativeAllowance}m but candidate needs ${duration}m.`);evidence.push(reason('PROJECT-ALLOWANCE','ProjectAllocator','minutes',authoritativeAllowance,`needs ${duration}m`,'hard'))}}}catch(error){blockers.push(`ProjectAllocator validation failed closed: ${error.message}`)}
       try{const recovery=RecoveryTimeEngine.evaluate(start,start+duration,sim,context.settings,block.date);if(recovery.protectedConflict){blockers.push(`Protected recovery conflicts with ${task.title||task.id}.`);evidence.push(reason('RECOVERY-PROTECTED','RecoveryTimeEngine','overlapMinutes',recovery.minutes,recovery.reasons?.join(' · ')||'Protected recovery','hard'))}}catch(error){blockers.push(`RecoveryTimeEngine validation failed closed: ${error.message}`)}
       for(const hard of this.hardRuleBlockers(task,{...candidate,date:block.date,startMinute,startMinute,startTime:block.startTime},context)){blockers.push(hard);evidence.push(reason('RULEENGINE-HARD','RuleEngine','constraint',hard,'Automatic matched hard rule','hard'))}
       sim.timeBlocks.push({...block,type:block.type||'task'})
@@ -164,20 +164,21 @@ class DecisionRankingEngine{
 class DecisionAlternativeGenerator{
   generate(ranked,context){
     if(!ranked.length)return[];
-    const selected=[],seen=new Set();
-    const add=(row,label)=>{if(row&&!seen.has(row.candidate.id)&&selected.length<MAX_ALTERNATIVES){seen.add(row.candidate.id);selected.push({...row,label})}};
+    const selected=[],seen=new Set(),keep=ranked.find(r=>r.candidate.kind===KEEP_CURRENT_PLAN),bestChange=ranked.find(r=>r.candidate.kind!==KEEP_CURRENT_PLAN),nonKeepLimit=Math.max(1,MAX_ALTERNATIVES-(keep?1:0));
+    const add=(row,label,{reserveKeep=true}={})=>{const limit=reserveKeep&&keep&&!seen.has(keep.candidate.id)?nonKeepLimit:MAX_ALTERNATIVES;if(row&&!seen.has(row.candidate.id)&&selected.length<limit){seen.add(row.candidate.id);selected.push({...row,label})}};
     add(ranked[0],'Recommended');
+    add(bestChange,'Best feasible change');
     const byDeadline=[...ranked].sort((a,b)=>b.tradeoffs.deadlineProtection-a.tradeoffs.deadlineProtection||a.tradeoffs.disruption-b.tradeoffs.disruption);
-    add(byDeadline[0],'Deadline-first');
+    add(byDeadline.find(r=>r.candidate.kind!==KEEP_CURRENT_PLAN)||byDeadline[0],'Deadline-first');
     const balanced=[...ranked].sort((a,b)=>{
       const av=(a.tradeoffs.deadlineProtection+a.tradeoffs.projectAlignment+a.tradeoffs.capacityFit+a.tradeoffs.bufferImpact)/4;
       const bv=(b.tradeoffs.deadlineProtection+b.tradeoffs.projectAlignment+b.tradeoffs.capacityFit+b.tradeoffs.bufferImpact)/4;
       return bv-av;
     });
-    add(balanced[0],'Balanced');
-    add([...ranked].sort((a,b)=>a.tradeoffs.disruption-b.tradeoffs.disruption||a.tradeoffs.contextCost-b.tradeoffs.contextCost)[0],'Lower-disruption');
-    add(ranked.find(r=>r.candidate.kind===KEEP_CURRENT_PLAN),'Keep current plan');
-    return selected;
+    add(balanced.find(r=>r.candidate.kind!==KEEP_CURRENT_PLAN)||balanced[0],'Balanced');
+    add([...ranked].filter(r=>r.candidate.kind!==KEEP_CURRENT_PLAN).sort((a,b)=>a.tradeoffs.disruption-b.tradeoffs.disruption||a.tradeoffs.contextCost-b.tradeoffs.contextCost)[0],'Lower-disruption');
+    if(keep&&!seen.has(keep.candidate.id)&&selected.length<MAX_ALTERNATIVES){seen.add(keep.candidate.id);selected.push({...keep,label:'Keep current plan'})}
+    return selected.slice(0,MAX_ALTERNATIVES);
   }
 }
 
