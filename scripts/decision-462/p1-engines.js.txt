@@ -1,0 +1,64 @@
+class DecisionOutcomeEngine{
+  constructor(app=host().app){this.app=app}
+  async create(decision,choice,operationId=''){
+    if(!decision?.decisionId||!choice?.candidate?.id)return null;
+    const {CoreUtil}=host(),id=`decision-outcome:${decision.decisionId}`,existing=await this.app.repo.get('activityLog',id);
+    if(existing)return existing;
+    const at=nowISO(),decisionDate=decision.request?.date||CoreUtil.localDate(),record={
+      id,type:'decision-outcome',text:`Decision follow-up: ${choice.candidate.title||choice.candidate.id}`,
+      decisionId:decision.decisionId,alternativeId:choice.candidate.id,operationId,status:'Pending',outcome:'',notes:'',
+      decisionDate,followUpDate:CoreUtil.addDays(decisionDate,1),appliedAt:at,recordedAt:'',at,createdAt:at,updatedAt:at,
+      decisionEngineVersion:DECISION_ENGINE_VERSION
+    };
+    await this.app.repo.save('activityLog',record,{validate:false});
+    return record;
+  }
+  async list(limit=100){
+    const rows=await this.app.repo.all('activityLog',{fresh:true});
+    return rows.filter(x=>x.type==='decision-outcome').sort((a,b)=>String(b.at||'').localeCompare(String(a.at||''))).slice(0,limit);
+  }
+  async pending(limit=20){return (await this.list(200)).filter(x=>x.status==='Pending').slice(0,limit)}
+  async record(decisionId,outcome,notes=''){
+    const allowed=new Set(['Worked','Partly','Did not work','Undone']);
+    if(!allowed.has(outcome))throw new Error('Decision outcome must be Worked, Partly, Did not work, or Undone.');
+    const id=`decision-outcome:${decisionId}`,current=await this.app.repo.get('activityLog',id);
+    if(!current)throw new Error('Decision follow-up record was not found.');
+    const at=nowISO(),next={...current,status:'Recorded',outcome,notes:String(notes||''),recordedAt:at,updatedAt:at,at};
+    await this.app.repo.save('activityLog',next,{validate:false});
+    return next;
+  }
+}
+
+class DecisionBriefEngine{
+  constructor(engine,app=host().app,outcomes=null){this.engine=engine;this.app=app;this.outcomes=outcomes||new DecisionOutcomeEngine(app)}
+  async morning(date=host().CoreUtil.localDate()){
+    const {CoreUtil,CapacityEngine}=host(),[data,settings]=await Promise.all([this.app.repo.dataset({fresh:true}),this.app.repo.settings()]);
+    let capacity=null;try{capacity=CapacityEngine.summary(date,data,settings)}catch{}
+    const todayRecommendation=await this.engine.analyze({type:DECISION_TYPES.TODAY_PLAN,date,mode:'preview',source:'morning-decision-brief'});
+    const deadlineRecommendation=await this.engine.analyze({type:DECISION_TYPES.DEADLINE_TRIAGE,date,mode:'preview',source:'morning-decision-brief',constraints:{horizonDays:3}});
+    const active=array(data.tasks).filter(activeTask),due=active.filter(task=>task.deadline&&task.deadline<=CoreUtil.addDays(date,3));
+    return{
+      kind:'morning-decision-brief',date,generatedAt:nowISO(),localOnly:true,
+      capacity:capacity?{focusRemaining:num(capacity.focusRemaining),physicalLeft:num(capacity.physicalLeft),status:capacity.status||''}:null,
+      dueCount:due.length,
+      todayRecommendation,
+      deadlineRecommendation,
+      summary:{
+        today:todayRecommendation.recommended?.explanation?.summary||'No feasible day-plan change is currently recommended.',
+        deadlines:deadlineRecommendation.recommended?.explanation?.summary||'No deadline-triage change is currently recommended.'
+      }
+    };
+  }
+  async endOfDay(date=host().CoreUtil.localDate()){
+    const [history,pending]=await Promise.all([new DecisionHistory(this.app).list(200),this.outcomes.pending(100)]);
+    const applied=history.filter(row=>row.status==='Applied'&&String(row.appliedAt||row.at||'').slice(0,10)===date);
+    const duePending=pending.filter(row=>!row.followUpDate||row.followUpDate<=host().CoreUtil.addDays(date,1));
+    return{
+      kind:'end-of-day-decision-review',date,generatedAt:nowISO(),localOnly:true,
+      appliedCount:applied.length,
+      applied,
+      pendingOutcomes:duePending,
+      summary:applied.length?`${applied.length} decision${applied.length===1?' was':'s were'} applied today; ${duePending.length} outcome follow-up${duePending.length===1?' is':'s are'} pending.`:`No Decision Engine mutation was applied on ${date}; ${duePending.length} outcome follow-up${duePending.length===1?' is':'s are'} pending.`
+    };
+  }
+}
