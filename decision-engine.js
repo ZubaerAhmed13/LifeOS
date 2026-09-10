@@ -453,6 +453,7 @@ class DecisionCenterUI{
     dialog.querySelector('[data-decision-analyze]').onclick=()=>this.analyze();
     dialog.addEventListener('click',event=>this.handle(event));
     dialog.addEventListener('change',event=>{const choice=event.target?.dataset?.decisionChoice;if(choice)this.selectedId=choice});
+    dialog.addEventListener('keydown',event=>{const choice=event.target?.dataset?.decisionChoice;if(choice&&event.key==='Enter'){event.preventDefault();this.selectedId=choice;dialog.querySelector(`button[data-preview="${CSS.escape(choice)}"]`)?.click()}});
   }
   open(){this.panel?.showModal();this.panel?.querySelector('[data-decision-analyze]')?.focus()}
   async analyze(){
@@ -462,7 +463,7 @@ class DecisionCenterUI{
       this.current=await this.engine.analyze({type,mode:'production',source:'decision-center'});
       this.preview=null;this.lastApplied=null;this.selectedId=this.current.recommended?.candidate?.id||this.current.alternatives[0]?.candidate?.id||'';
       status.textContent=`Decision analysis complete. ${this.current.alternatives.length} feasible alternative${this.current.alternatives.length===1?'':'s'} found. Confidence: ${this.current.confidence.label}.`;
-      this.render();
+      this.render();queueMicrotask(()=>this.panel.querySelector('input[data-decision-choice]:checked')?.focus());
     }catch(error){status.textContent=error.message;body.innerHTML=`<div class="note warning">${escapeHtml(error.message)}</div>`}
   }
   render(){
@@ -502,7 +503,7 @@ class DecisionCenterUI{
     }
     if(applyId){
       const status=this.panel.querySelector('[data-decision-status]');status.textContent='Revalidating before apply…';
-      try{const result=await this.engine.apply(this.current,applyId);this.lastApplied=result;status.textContent=result.noChange?'Current plan kept. No production mutation was made.':'Decision applied as one logical operation.';const out=this.panel.querySelector('[data-preview-output]');if(!result.noChange&&out)out.insertAdjacentHTML('beforeend','<div class="decision-undo"><button class="btn" data-decision-undo>Undo Decision</button></div>')}
+      try{const result=await this.engine.apply(this.current,applyId);this.lastApplied=result;status.textContent=result.noChange?'Current plan kept. No production mutation was made.':'Decision applied as one logical operation.';const out=this.panel.querySelector('[data-preview-output]');if(!result.noChange&&out){out.insertAdjacentHTML('beforeend','<div class="decision-undo"><button class="btn" data-decision-undo>Undo Decision</button></div>');queueMicrotask(()=>out.querySelector('[data-decision-undo]')?.focus())}}
       catch(error){status.textContent=error.message}
     }
   }
