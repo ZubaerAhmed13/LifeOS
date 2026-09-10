@@ -23,13 +23,6 @@ async function openAndAnalyze(page){
 async function firstActionableId(page){
   return page.evaluate(()=>LifeOS.app.decisionCenter.current?.alternatives.find(x=>x.candidate.kind!=='keep-current-plan')?.candidate.id||'');
 }
-async function tabTo(page,selector,max=120){
-  for(let i=0;i<max;i++){
-    if(await page.evaluate(sel=>document.activeElement?.matches?.(sel)||false,selector))return;
-    await page.keyboard.press('Tab');
-  }
-  throw new Error(`Keyboard focus did not reach ${selector}`);
-}
 
 test.describe('LifeOS 4.6.2 Master-Spec Certification Completion',()=>{
   test.beforeEach(async({page})=>{await resetApp(page);await waitForDecision(page)});
@@ -65,23 +58,21 @@ test.describe('LifeOS 4.6.2 Master-Spec Certification Completion',()=>{
 
   test('keyboard only chooses a different alternative then Preview → Apply → Undo',async({page})=>{
     await seedTask(page,{title:'Keyboard master-spec task'});const before=await planningHash(page);
-    await tabTo(page,'#decisionCenterButton');await page.keyboard.press('Enter');await expect(page.locator('#decisionCenterDialog')).toBeVisible();
+    await page.keyboard.press('Control+Alt+D');await expect(page.locator('#decisionCenterDialog')).toBeVisible();
     await expect(page.getByRole('button',{name:'Analyze'})).toBeFocused();await page.keyboard.press('Enter');
     await expect(page.locator('[data-decision-status]')).toContainText('Decision analysis complete');
-    await tabTo(page,'input[data-decision-choice]:checked');
+    const selected=page.locator('input[data-decision-choice]:checked');await expect(selected).toBeFocused();
     const originalId=await page.evaluate(()=>document.activeElement?.value||'');
     const optionCount=await page.locator('input[data-decision-choice]').count();expect(optionCount).toBeGreaterThan(1);
     await page.keyboard.press('ArrowDown');
     const selectedId=await page.evaluate(()=>document.activeElement?.matches?.('input[data-decision-choice]')?document.activeElement.value:'');
     expect(selectedId).not.toBe('');expect(selectedId).not.toBe(originalId);
-    await tabTo(page,'button[data-preview]');
-    expect(await page.evaluate(()=>document.activeElement?.dataset?.preview||'')).toBe(selectedId);
     await page.keyboard.press('Enter');
     await expect(page.locator('[data-decision-preview]')).toBeVisible();
     expect(await page.evaluate(()=>LifeOS.app.decisionCenter.preview?.alternativeId||'')).toBe(selectedId);
     await expect(page.getByRole('button',{name:'Apply this alternative'})).toBeFocused();await page.keyboard.press('Enter');
     await expect(page.locator('[data-decision-status]')).toContainText('Decision applied as one logical operation');
-    await tabTo(page,'button[data-decision-undo]');await page.keyboard.press('Enter');
+    await expect(page.getByRole('button',{name:'Undo Decision'})).toBeFocused();await page.keyboard.press('Enter');
     await expect(page.locator('[data-decision-status]')).toContainText('Decision undone');
     expect(await planningHash(page)).toBe(before)
   });
@@ -126,6 +117,8 @@ test.describe('LifeOS 4.6.2 Master-Spec Certification Completion',()=>{
     await page.locator('#decisionCenterButton').click();await page.getByRole('button',{name:'End-of-Day Decision Review'}).click();
     await expect(page.locator('[data-end-of-day-decision-review]')).toBeVisible();const follow=page.locator(`[data-decision-follow-up="${applied.decisionId}"]`);await expect(follow).toBeVisible();
     await follow.getByRole('button',{name:'Worked'}).click();
+    await expect(page.locator('[data-decision-status]')).toContainText('Decision outcome recorded: Worked.');
+    await expect(page.locator(`[data-decision-follow-up="${applied.decisionId}"]`)).toHaveCount(0);
     const outcome=await page.evaluate(async id=>LifeOS.app.repo.get('activityLog',`decision-outcome:${id}`),applied.decisionId);
     expect(outcome.status).toBe('Recorded');expect(outcome.outcome).toBe('Worked');expect(outcome.operationId).toBe(applied.operationId)
   });
