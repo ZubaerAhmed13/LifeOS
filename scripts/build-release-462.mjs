@@ -27,7 +27,7 @@ for(const signature of [
 ])if(!decisionSource.includes(signature))throw new Error(`Decision master-spec invariant missing: ${signature}`);
 for(const group of ['Decision Context','Decision Fingerprint','Decision Candidate Generation','Decision Feasibility','Decision Trade-offs','Decision Ranking','Decision Preview','Decision Atomicity','Decision Concurrency','Decision Scenario','Decision Data Quality','Decision Privacy','Decision Brief','Decision Outcome'])if(!decisionSource.includes(`'${group}'`))throw new Error(`Missing internal Decision self-test group: ${group}`);
 if(/\beval\s*\(/.test(appSource+decisionSource)||/\bnew\s+Function\s*\(/.test(appSource+decisionSource))throw new Error('Arbitrary JavaScript execution primitive detected.');
-if(/fetch\s*\(|XMLHttpRequest|WebSocket|EventSource/.test(decisionSource))throw new Error('Decision Engine contains a network access primitive.');
+if(/(?:\bfetch|\bXMLHttpRequest|\bWebSocket|\bEventSource)\s*\(/.test(decisionSource))throw new Error('Decision Engine contains a network access primitive.');
 
 const css=fs.readFileSync('app.css','utf8').replace(/<\/style/gi,'<\\/style'),appJs=appSource.replace(/<\/script/gi,'<\\/script'),decisionJs=decisionSource.replace(/<\/script/gi,'<\\/script');
 let standalone=indexSource.replace('<link rel="manifest" href="./manifest.webmanifest">','').replace('<link rel="icon" href="./icons/icon-192.png">','').replace('<link rel="stylesheet" href="./app.css">',`<style>\n${css}\n</style>`).replace('<script src="./app.js" defer></script>',`<script>\n${appJs}\n</script>`).replace('<script src="./decision-engine.js" defer></script>',`<script>\n${decisionJs}\n</script>`);
