@@ -1,0 +1,69 @@
+class DecisionCenterUI{
+  constructor(engine){this.engine=engine;this.app=engine.app||host().app;this.current=null;this.preview=null;this.button=null;this.panel=null;this.selectedId='';this.lastApplied=null;this.shortcutHandler=null}
+  mount(){
+    if(document.getElementById('decisionCenterButton'))return;
+    const button=document.createElement('button');button.id='decisionCenterButton';button.className='btn decision-center-launch';button.type='button';button.textContent='Decision Center';button.setAttribute('aria-haspopup','dialog');button.setAttribute('aria-keyshortcuts','Control+Alt+D');button.title='Decision Center · Ctrl+Alt+D';
+    button.addEventListener('click',()=>this.open());(document.querySelector('.top-actions')||document.body).prepend(button);this.button=button;
+    this.shortcutHandler=event=>{if(event.ctrlKey&&event.altKey&&!event.shiftKey&&String(event.key||'').toLowerCase()==='d'){event.preventDefault();this.open()}};document.addEventListener('keydown',this.shortcutHandler);
+    const dialog=document.createElement('dialog');dialog.id='decisionCenterDialog';dialog.className='decision-center-dialog';dialog.setAttribute('aria-labelledby','decisionCenterTitle');
+    dialog.innerHTML=`<div class="decision-center-shell"><div class="decision-center-head"><div><small>LifeOS 4.6.2 · Ctrl+Alt+D</small><h2 id="decisionCenterTitle">Decision Center</h2></div><button class="btn icon" data-decision-close aria-label="Close Decision Center">×</button></div><div class="decision-center-controls"><label>Decision <select data-decision-type><option value="next-action">What should I do now?</option><option value="today-plan">Today plan</option><option value="deadline-triage">Deadline triage</option><option value="project-allocation">Project allocation</option><option value="deferral">Deferral</option><option value="week-priority">Week priority</option><option value="schedule-conflict">Schedule conflict</option><option value="plan-repair">Plan repair</option></select></label><button class="btn primary" data-decision-analyze>Analyze</button></div><div class="decision-brief-actions" role="group" aria-label="Decision reviews"><button class="btn small" data-decision-brief="morning">Morning Decision Brief</button><button class="btn small" data-decision-brief="eod">End-of-Day Decision Review</button></div><div data-decision-status class="muted" role="status" aria-live="polite"></div><div data-decision-body></div></div>`;
+    document.body.append(dialog);this.panel=dialog;
+    dialog.querySelector('[data-decision-close]').onclick=()=>dialog.close();
+    dialog.querySelector('[data-decision-analyze]').onclick=()=>this.analyze();
+    dialog.addEventListener('click',event=>this.handle(event));
+    dialog.addEventListener('change',event=>{const choice=event.target?.dataset?.decisionChoice;if(choice)this.selectedId=choice});
+    dialog.addEventListener('keydown',event=>{const choice=event.target?.dataset?.decisionChoice;if(choice&&event.key==='Enter'){event.preventDefault();this.selectedId=choice;dialog.querySelector(`button[data-preview="${CSS.escape(choice)}"]`)?.click()}});
+  }
+  open(){this.panel?.showModal();this.panel?.querySelector('[data-decision-analyze]')?.focus()}
+  async analyze(){
+    const status=this.panel.querySelector('[data-decision-status]'),body=this.panel.querySelector('[data-decision-body]'),type=this.panel.querySelector('[data-decision-type]').value;
+    status.textContent='Analyzing current constraints, capacity, deadlines and trade-offs…';body.innerHTML='';
+    try{
+      this.current=await this.engine.analyze({type,mode:'production',source:'decision-center'});
+      this.preview=null;this.lastApplied=null;this.selectedId=this.current.recommended?.candidate?.id||this.current.alternatives[0]?.candidate?.id||'';
+      status.textContent=`Decision analysis complete. ${this.current.alternatives.length} feasible alternative${this.current.alternatives.length===1?'':'s'} found. Confidence: ${this.current.confidence.label}.`;
+      this.render();queueMicrotask(()=>this.panel.querySelector('input[data-decision-choice]:checked')?.focus());
+    }catch(error){status.textContent=error.message;body.innerHTML=`<div class="note warning">${escapeHtml(error.message)}</div>`}
+  }
+  render(){
+    const body=this.panel.querySelector('[data-decision-body]'),decision=this.current;if(!decision){body.innerHTML='';return}
+    if(!decision.recommended){body.innerHTML='<div class="note warning">No feasible alternative is available. Review blocked tasks and hard constraints.</div>';return}
+    const card=(alt,index)=>{
+      const id=escapeHtml(alt.candidate.id),checked=alt.candidate.id===this.selectedId?'checked':'';
+      return`<article class="decision-card ${index===0?'recommended':''}" data-alt="${id}"><div class="decision-choice"><input type="radio" name="decision-alternative" data-decision-choice="${id}" value="${id}" ${checked} aria-label="Choose ${escapeHtml(alt.candidate.title)}"><span>${escapeHtml(alt.label)}</span></div><h3>${escapeHtml(alt.candidate.title)}</h3>${alt.candidate.duration?`<div class="decision-duration">${alt.candidate.duration} min</div>`:''}<p>${escapeHtml(alt.explanation.summary)}</p><div class="decision-grid"><div><b>Protects</b><ul>${alt.explanation.protects.map(x=>`<li>${escapeHtml(x)}</li>`).join('')}</ul></div><div><b>Opportunity cost</b><p>${escapeHtml(alt.explanation.opportunityCost)}</p></div></div><details><summary>Why and trade-offs</summary><ul>${alt.tradeoffs.reasons.map(r=>`<li>${escapeHtml(r.reasonCode)} · ${escapeHtml(r.sourceEngine)}: ${escapeHtml(r.metric)} ${escapeHtml(r.value)}</li>`).join('')}</ul>${alt.explanation.whyLower?`<p>${escapeHtml(alt.explanation.whyLower)}</p>`:''}</details><div class="decision-actions"><button class="btn" data-preview="${id}">Preview</button><button class="btn primary" data-apply="${id}">Apply</button></div></article>`;
+    };
+    const shortfall=decision.capacityShortfall?.shortfallMinutes||0,shortfallNote=shortfall?`<div class="warning"><b>Capacity shortfall:</b> ${shortfall} minutes cannot fit in the remaining focus capacity today.</div>`:'';
+    body.innerHTML=`<section class="decision-summary"><div><b>Recommended decision</b><span class="decision-confidence">Confidence: ${escapeHtml(decision.confidence.label)}</span></div><small>Exact context ${escapeHtml(decision.contextFingerprint)} · ${escapeHtml(String(decision.durationMs))} ms</small></section>${shortfallNote}${decision.dataQuality.missingInputs.length?`<div class="note">${decision.dataQuality.missingInputs.map(escapeHtml).join(' ')}</div>`:''}<div class="decision-card-list">${decision.alternatives.map(card).join('')}</div><div data-preview-output></div>`;
+  }
+  blockList(blocks){
+    return blocks.length?`<ul class="decision-block-list">${blocks.map(block=>`<li>${escapeHtml(block.date||'')} ${escapeHtml(block.startTime||'')} · ${escapeHtml(String(block.duration||0))} min${block.title?` · ${escapeHtml(block.title)}`:''}</li>`).join('')}</ul>`:'<p class="muted">No affected schedule blocks.</p>';
+  }
+  previewHTML(preview){
+    const f=preview.forecastEffect||{},o=preview.opportunity||{};
+    return`<section class="decision-preview" data-decision-preview><div class="decision-preview-head"><div><h3>Preview</h3><p><b>Production state is unchanged until Apply.</b></p></div><span class="pill">Immutable preview</span></div><div class="decision-preview-compare"><section class="decision-preview-panel" data-preview-current><h4>CURRENT</h4><p>${escapeHtml(preview.current.summary)}</p>${this.blockList(preview.current.blocks)}</section><section class="decision-preview-panel" data-preview-proposed><h4>PROPOSED</h4><p>${escapeHtml(preview.proposed.summary)}</p>${this.blockList(preview.proposed.blocks)}</section></div><div class="decision-preview-metrics"><section class="decision-preview-panel" data-preview-forecast><h4>Forecast effect</h4><p>Risk points: <b>${escapeHtml(String(f.beforeRiskPoints??0))} → ${escapeHtml(String(f.afterRiskPoints??0))}</b></p><p>Deadline shortfall: <b>${escapeHtml(String(f.shortfallBefore??0))} → ${escapeHtml(String(f.shortfallAfter??0))} min</b></p><p>Improved tasks: ${escapeHtml(String(f.improvedTasks??0))} · Worsened: ${escapeHtml(String(f.worsenedTasks??0))}</p></section><section class="decision-preview-panel" data-preview-opportunity><h4>Opportunity cost</h4><p>Capacity committed: <b>${escapeHtml(String(o.capacityConsumedMinutes??0))} min</b></p><p>Remaining capacity: <b>${escapeHtml(String(o.remainingCapacityMinutes??0))} min</b></p><p>Competing work uncovered: <b>${escapeHtml(String(o.opportunityCostMinutes??0))} min</b></p></section></div><p>${preview.changes.map(escapeHtml).join(' ')||'No production change.'}</p><small>Fingerprint ${escapeHtml(preview.productionFingerprintBefore)}</small><div class="decision-actions"><button class="btn primary" data-apply="${escapeHtml(preview.alternativeId)}" autofocus>Apply this alternative</button></div></section>`;
+  }
+  async showMorning(){
+    const status=this.panel.querySelector('[data-decision-status]'),body=this.panel.querySelector('[data-decision-body]');status.textContent='Building Morning Decision Brief from local planning data…';
+    try{const brief=await this.engine.morningBrief();const cap=brief.capacity||{};body.innerHTML=`<section class="decision-brief" data-morning-decision-brief><h3>Morning Decision Brief</h3><div class="grid grid-3"><div class="card"><b>Today</b><p>${escapeHtml(brief.summary.today)}</p></div><div class="card"><b>Deadlines</b><p>${escapeHtml(brief.summary.deadlines)}</p><small>${escapeHtml(String(brief.dueCount))} due/near-due active task(s)</small></div><div class="card"><b>Focus capacity</b><p>${escapeHtml(String(cap.focusRemaining??0))} min remaining</p><small>${escapeHtml(cap.status||'Local capacity model')}</small></div></div><p class="muted">Generated locally · no production mutation.</p></section>`;status.textContent='Morning Decision Brief ready.'}catch(error){status.textContent=error.message}
+  }
+  async showEndOfDay(){
+    const status=this.panel.querySelector('[data-decision-status]'),body=this.panel.querySelector('[data-decision-body]');status.textContent='Building End-of-Day Decision Review from local history…';
+    try{const review=await this.engine.endOfDayReview();const pending=review.pendingOutcomes.map(row=>`<div class="decision-follow-up" data-decision-follow-up="${escapeHtml(row.decisionId)}"><b>${escapeHtml(row.text||row.decisionId)}</b><p class="muted">Applied ${escapeHtml(row.appliedAt||'')} · Follow-up ${escapeHtml(row.followUpDate||'')}</p><div class="actions"><button class="btn small" data-decision-outcome="Worked" data-decision-id="${escapeHtml(row.decisionId)}">Worked</button><button class="btn small" data-decision-outcome="Partly" data-decision-id="${escapeHtml(row.decisionId)}">Partly</button><button class="btn small" data-decision-outcome="Did not work" data-decision-id="${escapeHtml(row.decisionId)}">Did not work</button></div></div>`).join('');body.innerHTML=`<section class="decision-brief" data-end-of-day-decision-review><h3>End-of-Day Decision Review</h3><p>${escapeHtml(review.summary)}</p><div><b>Applied today:</b> ${escapeHtml(String(review.appliedCount))}</div>${pending||'<p class="muted">No pending decision outcome follow-up.</p>'}</section>`;status.textContent='End-of-Day Decision Review ready.'}catch(error){status.textContent=error.message}
+  }
+  async handle(event){
+    const target=event.target,brief=target?.dataset?.decisionBrief,outcome=target?.dataset?.decisionOutcome,decisionId=target?.dataset?.decisionId,previewId=target?.dataset?.preview,applyId=target?.dataset?.apply;
+    if(brief==='morning')return this.showMorning();
+    if(brief==='eod')return this.showEndOfDay();
+    if(outcome&&decisionId){const status=this.panel.querySelector('[data-decision-status]');target.disabled=true;try{await this.engine.recordOutcome(decisionId,outcome);await this.showEndOfDay();status.textContent=`Decision outcome recorded: ${outcome}.`;return}catch(error){target.disabled=false;status.textContent=error.message;return}}
+    if(target?.dataset?.decisionUndo!==undefined){const status=this.panel.querySelector('[data-decision-status]');try{const result=await this.app.undo.undo();if(this.current?.decisionId)try{await this.engine.recordOutcome(this.current.decisionId,'Undone','Undo from Decision Center')}catch{}status.textContent=result?'Decision undone. The production state was restored.':'No Decision operation is available to undo.';this.lastApplied=null;return}catch(error){status.textContent=error.message;return}}
+    if(previewId){
+      this.selectedId=previewId;const radio=this.panel.querySelector(`input[data-decision-choice="${CSS.escape(previewId)}"]`);if(radio)radio.checked=true;
+      this.preview=this.engine.preview(this.current,previewId);const out=this.panel.querySelector('[data-preview-output]');out.innerHTML=this.previewHTML(this.preview);out.scrollIntoView({block:'nearest'});queueMicrotask(()=>out.querySelector('[data-apply]')?.focus());return;
+    }
+    if(applyId){
+      const status=this.panel.querySelector('[data-decision-status]');status.textContent='Revalidating before apply…';
+      try{const result=await this.engine.apply(this.current,applyId);this.lastApplied=result;status.textContent=result.noChange?'Current plan kept. No production mutation was made.':'Decision applied as one logical operation.';const out=this.panel.querySelector('[data-preview-output]');if(!result.noChange&&out){out.insertAdjacentHTML('beforeend','<div class="decision-undo"><button class="btn" data-decision-undo>Undo Decision</button></div>');queueMicrotask(()=>out.querySelector('[data-decision-undo]')?.focus())}}
+      catch(error){status.textContent=error.message}
+    }
+  }
+}

@@ -1,0 +1,11 @@
+  async record(decision,choice,status,extra={}){
+    const affected=[...new Set([...(choice.candidate.affectedEntityIds||[]),choice.candidate.taskId,choice.candidate.projectId].filter(Boolean))],record={
+      id:`decision-history:${decision.decisionId}:${Date.now()}`,decisionId:decision.decisionId,type:decision.request.type,
+      selectedAlternative:choice.candidate.id,status,reasons:choice.tradeoffs.reasons,affectedEntityIds:affected,
+      operationId:extra.operationId||'',generatedAt:decision.generatedAt,appliedAt:status==='Applied'?nowISO():'',
+      candidateTitle:choice.candidate.title||'',decisionEngineVersion:DECISION_ENGINE_VERSION
+    };
+    try{await this.app.repo.save('activityLog',{...record,type:'decision-history',text:`${status}: ${choice.candidate.title}`,at:nowISO(),createdAt:nowISO(),updatedAt:nowISO()},{validate:false})}catch{}
+    if(status==='Applied'&&!extra.noChange&&this.outcomes)try{await this.outcomes.create(decision,choice,extra.operationId||'')}catch{}
+    return{record,...extra};
+  }

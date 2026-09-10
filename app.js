@@ -1,9 +1,9 @@
 'use strict';
 
-  const APP_VERSION='4.6.1';
+  const APP_VERSION='4.6.2';
   const INTELLIGENCE_MODEL_VERSION='4.4.2';
   const RULE_ENGINE_VERSION='4.5.1';
-  const DECISION_ENGINE_VERSION='4.6.1';
+  const DECISION_ENGINE_VERSION='4.6.2';
   const RULE_SCHEMA_VERSION=1;
   const MAX_RULE_CHAIN_DEPTH=5;
   const RULE_HISTORY_LIMIT=250;
@@ -11,7 +11,7 @@
   const DB_SCHEMA_VERSION=16;
   const SCHEDULER_VERSION='4.1.0';
   const BACKUP_VERSION=2;
-  const BUILD_NAME='Professional Core · Decision Planning Completion';
+  const BUILD_NAME='Professional Core · Master-Spec Certification Completion';
   const DB_NAME='LifeOSDB';
 
   const STORE_DEFINITIONS={

@@ -1,0 +1,57 @@
+class DecisionPreviewManager{
+  currentBlocks(candidate){
+    if(PLAN_KINDS.has(candidate.kind))return array(candidate.plan?.remove);
+    if(['deferral-plan','plan-repair','schedule-conflict-plan'].includes(candidate.kind))return array(candidate.changes).filter(c=>c.store==='timeBlocks'&&c.before).map(c=>c.before);
+    return[];
+  }
+  proposedBlocks(candidate){
+    if(PLAN_KINDS.has(candidate.kind))return array(candidate.plan?.planned).map(x=>x.block);
+    if(candidate.kind==='task-session')return[{taskId:candidate.taskId,date:candidate.date,startTime:host().CoreUtil.time(candidate.startMinute),duration:candidate.duration}];
+    if(['deferral-plan','plan-repair','schedule-conflict-plan'].includes(candidate.kind))return array(candidate.changes).filter(c=>c.store==='timeBlocks'&&c.after).map(c=>c.after);
+    return[];
+  }
+  build(decision,alternativeId){
+    const choice=decision.alternatives.find(a=>a.candidate.id===alternativeId)||decision.alternatives[0];
+    if(!choice)throw new Error('No feasible alternative is available.');
+    const candidate=choice.candidate,currentBlocks=this.currentBlocks(candidate),blocks=this.proposedBlocks(candidate),tradeoffs=choice.tradeoffs||{},forecast=clone(tradeoffs.forecastEffect||{});
+    return{
+      previewId:`preview:${decision.decisionId}:${candidate.id}`,
+      decisionId:decision.decisionId,
+      alternativeId:candidate.id,
+      contextFingerprint:decision.contextFingerprint,
+      productionFingerprintBefore:decision.contextFingerprint,
+      current:{
+        scope:'affected-schedule',
+        blockCount:currentBlocks.length,
+        blocks:clone(currentBlocks),
+        changeCount:currentBlocks.length,
+        summary:currentBlocks.length?`${currentBlocks.length} affected production block${currentBlocks.length===1?'':'s'} before this alternative.`:'No existing affected production block; the current state is unchanged.'
+      },
+      proposed:{
+        type:candidate.kind,
+        taskId:candidate.taskId||'',
+        date:candidate.date,
+        duration:candidate.duration,
+        startMinute:candidate.startMinute,
+        blockCount:blocks.length,
+        blocks:clone(blocks),
+        changeCount:array(candidate.changes).length,
+        summary:blocks.length?`${blocks.length} proposed block${blocks.length===1?'':'s'} in the affected scope.`:candidate.kind===KEEP_CURRENT_PLAN?'Keep the current plan with no production mutation.':'The proposal changes state without adding a schedule block.'
+      },
+      changes:clone(choice.explanation?.changes||[]),
+      warnings:clone(choice.explanation?.risks||[]),
+      forecastEffect:forecast,
+      opportunity:{
+        opportunityCostMinutes:num(tradeoffs.opportunityCostMinutes),
+        capacityConsumedMinutes:num(tradeoffs.capacityConsumedMinutes),
+        remainingCapacityMinutes:num(tradeoffs.remainingCapacityMinutes),
+        competingDemandMinutes:num(tradeoffs.competingDemandMinutes),
+        projectEffect:clone(tradeoffs.projectEffect||{}),
+        stability:clone(tradeoffs.stability||{})
+      },
+      opportunityCostMinutes:num(tradeoffs.opportunityCostMinutes),
+      generatedAt:nowISO(),
+      immutable:true
+    };
+  }
+}
